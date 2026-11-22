@@ -1,0 +1,619 @@
+{
+  "name": "ai-pipeline v1 skeleton (fake, AI 0 calls)",
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "nodes": [
+    {
+      "id": "3f6ffeb4-a28f-4ebf-8454-a761a5cb2663",
+      "name": "시작",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "2f0bc27d-3e25-4cbd-b03a-36f27a13a716",
+      "name": "설정",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7c85d9e2-dd9f-4149-81db-054b43eb5f2d",
+              "name": "runId",
+              "value": "={{ $now.toFormat('yyyyMMdd-HHmmss') }}",
+              "type": "string"
+            },
+            {
+              "id": "c304f4ba-15d3-4cf4-b07b-a0dcc0a59b37",
+              "name": "mode",
+              "value": "fake",
+              "type": "string"
+            },
+            {
+              "id": "22abcc67-aa4b-4622-b294-5a0dbe97b79a",
+              "name": "scenario",
+              "value": "pass",
+              "type": "string"
+            },
+            {
+              "id": "96ca8099-0c8b-4a72-aeff-a64fb9b39e4c",
+              "name": "maxAttempts",
+              "value": 3,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9a129bb9-a906-459f-9a0e-3de3a8ac809d",
+      "name": "S0 사전 확인",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s0 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+      }
+    },
+    {
+      "id": "678f1a55-4dd0-4dab-82e5-a9efc5e577e0",
+      "name": "S2 개발",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s2 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }} -Attempt {{ $runIndex + 1 }}"
+      }
+    },
+    {
+      "id": "997b9b83-aa24-4db1-8876-1dc522abd442",
+      "name": "S3 코드 리뷰",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s3 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }} -Attempt {{ $runIndex + 1 }}"
+      }
+    },
+    {
+      "id": "7b961cc8-a6ac-4da3-b902-3e00a9a86703",
+      "name": "S4 실행",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        300
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s4 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+      }
+    },
+    {
+      "id": "9e32778e-d29a-4090-bc70-602a690eafbe",
+      "name": "S5 1차 검수",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1700,
+        300
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s5 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+      }
+    },
+    {
+      "id": "91d4d19e-06b6-496e-ac30-8966d708d1f8",
+      "name": "S6 2차 검수",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s6 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+      }
+    },
+    {
+      "id": "300fc5de-4dbd-4c99-9df4-5026873f331a",
+      "name": "판정",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1500,
+        620
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2f07af9a-f5a6-4531-924c-ede8d7b71d06",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s0",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "e4ffa810-e0b2-4a2b-a4c5-3fca7a6eda83",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S0 통과 → S2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "015873ed-baa8-4da5-bad3-477eedd811c0",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "fbaa10f2-9421-44e2-bd88-52087a273929",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S2 통과 → S3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2731a178-9468-4ff2-9f6f-72699504a2f0",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "27a797d8-c2c7-497b-afba-9d9f2a1e1457",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  },
+                  {
+                    "id": "91a5538c-a278-48cc-ac43-338def16f84a",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).verdict }}",
+                    "rightValue": "PASS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S3 PASS → S4"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8b3811e0-1e37-450e-9f3e-c2c58f51f0ab",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s3",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "34dcafb0-4ba5-410e-8915-3d20db5bb09d",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  },
+                  {
+                    "id": "095031a8-37e7-41f1-bb24-d457dc8e88ad",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).verdict }}",
+                    "rightValue": "BLOCK",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "66c8032b-957d-4053-9e77-ec3d1efb523f",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).attempt }}",
+                    "rightValue": "={{ $('설정').first().json.maxAttempts }}",
+                    "operator": {
+                      "type": "number",
+                      "operation": "lt"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S3 BLOCK·재시도 남음 → S2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "aa6087e7-bc1e-48fc-9651-a1371c5542f7",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s4",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "020656fa-76ba-4152-adbb-26042d9ad256",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S4 통과 → S5"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ba86c635-24fb-4e00-a644-c42d7f24395e",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s5",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "e9872e11-a9f0-408d-ab11-6a6f9bd89fef",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S5 통과(PASS·BLOCK 무관) → S6"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "그 밖(S6 끝·실패·재시도 초과) → 결과 기록"
+        }
+      }
+    },
+    {
+      "id": "59ac09e0-94e7-4f8f-b85f-9f58547cd73a",
+      "name": "결과 기록",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1800,
+        620
+      ],
+      "parameters": {
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage end -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }} -Outcome {{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage === 's6' && JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok === true ? 'pass' : 'stopped' }}"
+      }
+    },
+    {
+      "id": "2c6be6b3-8045-44fb-902a-6d0ee7d3914e",
+      "name": "정상 완료?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2050,
+        620
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5dbbc0b0-1a9f-477c-9b0a-2ad058b75337",
+              "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "3fb0cc3f-b95e-4f69-989d-dad34b87f6a0",
+      "name": "멈춤",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2300,
+        720
+      ],
+      "parameters": {
+        "errorMessage": "Pipeline stopped. See RESULT (fake: .pipeline/fake/RESULT.md) and .pipeline/logs/"
+      }
+    }
+  ],
+  "connections": {
+    "시작": {
+      "main": [
+        [
+          {
+            "node": "설정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "설정": {
+      "main": [
+        [
+          {
+            "node": "S0 사전 확인",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S0 사전 확인": {
+      "main": [
+        [
+          {
+            "node": "판정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S2 개발": {
+      "main": [
+        [
+          {
+            "node": "판정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S3 코드 리뷰": {
+      "main": [
+        [
+          {
+            "node": "판정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S4 실행": {
+      "main": [
+        [
+          {
+            "node": "판정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S5 1차 검수": {
+      "main": [
+        [
+          {
+            "node": "판정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "S6 2차 검수": {
+      "main": [
+        [
+          {
+            "node": "판정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "판정": {
+      "main": [
+        [
+          {
+            "node": "S2 개발",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "S3 코드 리뷰",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "S4 실행",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "S2 개발",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "S5 1차 검수",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "S6 2차 검수",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "결과 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "결과 기록": {
+      "main": [
+        [
+          {
+            "node": "정상 완료?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "정상 완료?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "멈춤",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
