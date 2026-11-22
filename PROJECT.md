@@ -354,3 +354,12 @@
   - S0 새 기록 정상: `python=Python 3.12.10`, `git=git version 2.56.0.windows.4`, `head=ok`, `author=set`, `branch=main`, `changed before run=0`
   - RESULT에 `changed before run`·`git: no commit` 줄 정상. fake라 브랜치·커밋 생기지 않음 (main 커밋 1개 그대로)
   - 아직 확인 안 함: real PASS의 커밋(브랜치 생성·커밋), real S4의 이전 출력 옮기기·s4.json, 입력값 오류의 n8n 경로 (이 채팅 작업 공간에서만 확인)
+- ✅ real 확인 (run 20261123-084736, 08:47:36~08:49:06, Claude 2·Codex 2):
+  - PASS. `run/20261123-084736`에 커밋 `6f0ec5c` 1개 (PROJECT.md·REPORT.md·RESULT.md. hello.py·runs/output.txt는 내용이 같아 변경 없음). 한글 커밋 메시지 정상
+  - S4: 이전 `runs/output.txt`를 `.pipeline/runs-prev/20261123-084736/`로 옮긴 뒤 새로 생성, `run-…-s4.json` 기록. ⑤ Codex가 이 파일로 종료 코드를 확인함 (리뷰 원문). ⑥이 읽었는지는 출력에 남지 않아 미확인
+  - RESULT: `changed before run: 1 - M PROJECT.md`, `git: commit on branch …` 정상
+  - ⑥ 지적: 완료 조건 3("어떻게 확인했는지")이 계획만 있고 결과가 없어 약함 (RECOMMEND PASS). "S0 변경 1개 vs 시작 시점 2개" 지적은 착오로 봄 — S0 기록은 PROJECT.md 1개, REPORT.md는 그 뒤 ②가 바꿈. Claude Code가 세션 시작 때 받는 git 상태가 ② 이후 시점이라 생긴 차이로 추정
+  - ⑦ 판정 (사람): 승인, `git merge --ff-only`로 main 병합 (main = `6f0ec5c`)
+  - 참고 (확인): 병합 뒤 작업 폴더 파일이 CRLF로 바뀜 — Windows git의 줄바꿈 자동 변환(autocrlf)으로 추정. 내용 변경은 없음(autocrlf 기준 git status 깨끗)
+  - 참고: `refs/agents/…` "Agent host session" 커밋 3개가 있음. 파이프라인과 무관하고 main 이력에 없음. 노트북의 다른 AI 도구가 남긴 체크포인트로 추정(출처 미확인). main만 push하면 올라가지 않음
+- GitHub (2026-11-23): 공개 저장소 https://github.com/zoobihn-youn/ai-pipeline 생성됨. 저장소에 README.md 커밋 1개가 이미 있어(GitHub 화면 확인) 로컬 main과 이력이 달라 그냥 push하면 거절됨 → 처리 방법 결정 필요
