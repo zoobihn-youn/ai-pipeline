@@ -348,3 +348,9 @@
   2. 첫 커밋: `cd C:\dev\ai-pipeline` → `git add -A` → `git commit -m "v1 baseline before git stage"` (이게 없으면 S0이 멈춤)
   3. n8n 새 워크플로(12노드)에서 mode=`fake`로 pass·block1·blockall·fail4 다시 실행 → 17절과 같은 결과 + S0 note에 python·git 기록이 나오는지
   4. 커밋 확인용 real 실행 1회는 따로 결정 (AI 호출 Claude 2·Codex 2)
+- ✅ 노트북 확인 (2026-11-23 08:42~08:45, AI 호출 0회):
+  - 첫 커밋 (사람): `v1 baseline before git stage` (main, 작성자 설정됨). `.pipeline/`은 빠지고 scripts·workflows·tests·work 등 26개 파일
+  - fake 4개 다시 실행 (Windows PowerShell 5.1, 실제 cmd.exe·git): pass 084458, block1 084521, blockall 084535, fail4 084550 → 단계·시도·판정·멈춘 위치 모두 17절과 같음
+  - S0 새 기록 정상: `python=Python 3.12.10`, `git=git version 2.56.0.windows.4`, `head=ok`, `author=set`, `branch=main`, `changed before run=0`
+  - RESULT에 `changed before run`·`git: no commit` 줄 정상. fake라 브랜치·커밋 생기지 않음 (main 커밋 1개 그대로)
+  - 아직 확인 안 함: real PASS의 커밋(브랜치 생성·커밋), real S4의 이전 출력 옮기기·s4.json, 입력값 오류의 n8n 경로 (이 채팅 작업 공간에서만 확인)

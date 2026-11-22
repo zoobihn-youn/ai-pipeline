@@ -1,3 +1,26 @@
+## 2026-11-23T08:48:10+09:00 S4 run (run 20261123-084736) - written by stage.ps1, no AI
+
+- command: `python work/hello.py`
+- exit code: 0
+- stdout: 
+- stderr: 
+- moved old runs/ files: 1
+- raw: .pipeline/logs/run-20261123-084736-s4.json (exit code), .stdout.txt, .stderr.txt
+
+## 2026-11-23T08:47:38+09:00 S2 develop (run 20261123-084736, attempt 1)
+
+**만든 것 / 바꾼 것**
+- `work/hello.py` (이번 실행에서 변경 없음): 이미 있던 파일을 읽어 TASK.md 요구와 대조했다. 실행하면 스크립트 위치 기준 `<프로젝트>/runs/output.txt`를 만들고(폴더가 없으면 생성) 내용을 정확히 `pipeline ok`(줄바꿈 없음, UTF-8)로 쓴다. 그대로 두었다.
+- `REPORT.md` (수정): 이 섹션을 맨 위에 추가했고 기존 내용은 그대로 아래에 두었다.
+
+**이번 단계에서 실행하지 않은 것**
+- 코드를 실행하거나 테스트하지 않았다 (TASK.md와 S2 규칙). 아래 확인은 뒤 단계에서 한다.
+
+**완료 조건 확인 방법 (뒤 단계에서 확인)**
+1. `python work/hello.py` 종료 코드 0 → ④ 실행 단계가 `RUN: python work/hello.py`를 실행하고 종료 코드를 기록해 확인한다.
+2. `runs/output.txt` 내용이 정확히 `pipeline ok` → ④ 또는 ⑤ 검수가 파일을 읽어 문자열을 비교해 확인한다 (줄바꿈이 없는지도 본다).
+3. REPORT.md 맨 위에 만든 것과 확인 방법을 적음 → 이 섹션이 맨 위에 있는지 ⑤ 검수가 본다.
+
 ## 2026-11-23T08:04:45+09:00 S4 run (run 20261123-080359) - written by stage.ps1, no AI
 
 - command: `python work/hello.py`
