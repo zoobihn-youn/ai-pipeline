@@ -4,6 +4,7 @@
 # A stage asked to run real that is not implemented yet refuses, so no accidental AI call.
 # Scenarios (fake only): pass | block1 (S3 BLOCK on attempt 1, then PASS) | blockall (S3 always BLOCK) | fail4 (S4 fails)
 # Arguments are checked inside the script (PROJECT.md 18), so a bad value still prints the JSON line and is logged.
+# Project settings (PROJECT.md 20, standard/STANDARD.md 5): paths, model, turns, timeouts and folders to move come from <PROJECT_ROOT>/pipeline.json.
 # Git (PROJECT.md 18): S0 checks git and records files already changed; end commits ONCE on branch run/<RunId>, only when mode=real and outcome=pass.
 param(
     [string]$Stage = "",
@@ -57,6 +58,7 @@ function Read-Verdict([string]$file) {
 }
 
 # Time limit for every external call (PROJECT.md 5: stop when time runs out). User decision 2026-11-22: 3 minutes.
+# This is only the default; pipeline.json timeouts_sec (default / per stage) overrides it (PROJECT.md 20).
 $script:timeoutSec = 180
 
 function Quote-Arg([string]$a) {
@@ -65,8 +67,78 @@ function Quote-Arg([string]$a) {
     return '"' + $a.Replace('"', '\"') + '"'
 }
 
+# ---- Project settings: <PROJECT_ROOT>/pipeline.json (PROJECT.md 20, STANDARD.md 5) ----
+# Paths are relative to the project root. They are used in permission rules and in prompts that go through cmd.exe,
+# so they may not go up (..), be absolute, or contain quotes or cmd special characters.
+function Test-RelPath([string]$p) {
+    if (-not $p) { return $false }
+    if ($p -match '^[\\/]' -or $p -match '^[A-Za-z]:' -or $p -match '(^|[\\/])\.\.([\\/]|$)') { return $false }
+    if ($p -match '["`<>&|^%]') { return $false }
+    return $true
+}
+function Read-PipelineConfig {
+    $f = Join-Path $root "pipeline.json"
+    if (-not (Test-Path -LiteralPath $f)) { return @{ error = "pipeline.json missing in PROJECT_ROOT (STANDARD.md 5, template standard/pipeline.template.json)" } }
+    $j = $null
+    try { $j = [System.IO.File]::ReadAllText($f, $utf8) | ConvertFrom-Json } catch { return @{ error = "pipeline.json is not valid JSON: " + $_.Exception.Message } }
+    $c = @{ error = "" }
+    $c.writePaths    = @($j.develop.write_paths | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    $c.model         = if ($j.develop.model) { [string]$j.develop.model } else { "haiku" }
+    $c.maxTurns      = if ($j.develop.max_turns) { [int]$j.develop.max_turns } else { 10 }
+    $c.model6        = if ($j.second_review.model) { [string]$j.second_review.model } else { "haiku" }
+    $c.maxTurns6     = if ($j.second_review.max_turns) { [int]$j.second_review.max_turns } else { 10 }
+    $c.moveBeforeRun = @($j.run.move_before_run | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    $c.codePaths     = @($j.review.code_paths | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    $c.outputPaths   = @($j.review.output_paths | Where-Object { $_ } | ForEach-Object { [string]$_ })
+    $c.timeouts      = $j.timeouts_sec
+    $errs = @()
+    if ($c.writePaths.Count -eq 0) { $errs += "develop.write_paths is empty" }
+    if ($c.writePaths -notcontains "REPORT.md") { $errs += "develop.write_paths must include REPORT.md (stage 2 writes its report there)" }
+    if ($c.codePaths.Count -eq 0) { $errs += "review.code_paths is empty" }
+    foreach ($p in @($c.writePaths + $c.moveBeforeRun + $c.codePaths + $c.outputPaths)) {
+        if (-not (Test-RelPath $p)) { $errs += "bad path '$p' (relative, no '..', no quotes or cmd special characters)" }
+    }
+    foreach ($p in $c.moveBeforeRun) {
+        if (@("", ".", ".pipeline", ".git") -contains $p.Trim().TrimEnd('/', '\')) { $errs += "run.move_before_run cannot be '$p'" }
+    }
+    foreach ($m in $c.model, $c.model6) { if ($m -notmatch '^[A-Za-z0-9._-]+$') { $errs += "bad model name '$m'" } }
+    foreach ($t in $c.maxTurns, $c.maxTurns6) { if ($t -lt 1 -or $t -gt 100) { $errs += "max_turns must be 1-100" } }
+    if ($c.timeouts) {
+        foreach ($pr in $c.timeouts.PSObject.Properties) {
+            $v = 0
+            if (-not [int]::TryParse([string]$pr.Value, [ref]$v) -or $v -lt 10 -or $v -gt 7200) { $errs += ("timeouts_sec." + $pr.Name + " must be 10-7200") }
+        }
+    }
+    $c.error = $errs -join "; "
+    return $c
+}
+function Get-StageTimeout([string]$st) {
+    $t = 180
+    if ($cfg -and $cfg.timeouts) {
+        if ($cfg.timeouts.default) { $t = [int]$cfg.timeouts.default }
+        $v = $cfg.timeouts.$st
+        if ($v) { $t = [int]$v }
+    }
+    return $t
+}
+
+# Decode program output whose encoding is not known (the RUN command of any project, PROJECT.md 20).
+# Try strict UTF-8 first; if the bytes are not valid UTF-8, use the Windows ANSI code page (CP949 on Korean Windows).
+# 2026-11-23: python printed UTF-8 but the old code read it as CP949, so Korean in the S4 log was broken.
+function ConvertFrom-OutputBytes([byte[]]$bytes, $fallback) {
+    if ($null -eq $bytes -or $bytes.Length -eq 0) { return @{ text = ""; enc = "empty" } }
+    try {
+        $strict = New-Object System.Text.UTF8Encoding($false, $true)
+        return @{ text = $strict.GetString($bytes); enc = "utf-8" }
+    } catch {
+        if ($null -eq $fallback) { $fallback = [System.Text.Encoding]::Default }
+        return @{ text = $fallback.GetString($bytes); enc = ("codepage " + $fallback.CodePage) }
+    }
+}
+
 # Start a program with stdin closed at once, read its output, and kill the whole process tree if it runs past the limit.
-# $file = program, $arguments = one command-line string, $tag = log name part, $utf8Out = decode output as UTF-8.
+# $file = program, $arguments = one command-line string, $tag = log name part,
+# $utf8Out = decode output as UTF-8 (AI tools and git); $false = read raw bytes and detect (UTF-8, else ANSI code page).
 # $stdinText (optional) is written to the program's stdin as UTF-8 bytes, then stdin is closed (PROJECT.md 18: Korean text for Codex).
 function Invoke-Native([string]$file, [string]$arguments, [string]$tag, [bool]$utf8Out, [string]$stdinText = "") {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -86,8 +158,15 @@ function Invoke-Native([string]$file, [string]$arguments, [string]$tag, [bool]$u
         $p.StandardInput.BaseStream.Flush()
     }
     $p.StandardInput.Close()   # codex exec otherwise waits for more input forever under n8n (PROJECT.md 16)
-    $outTask = $p.StandardOutput.ReadToEndAsync()
-    $errTask = $p.StandardError.ReadToEndAsync()
+    if ($utf8Out) {
+        $outTask = $p.StandardOutput.ReadToEndAsync()
+        $errTask = $p.StandardError.ReadToEndAsync()
+    } else {
+        $outMem = New-Object System.IO.MemoryStream
+        $errMem = New-Object System.IO.MemoryStream
+        $outTask = $p.StandardOutput.BaseStream.CopyToAsync($outMem)
+        $errTask = $p.StandardError.BaseStream.CopyToAsync($errMem)
+    }
     $done = $p.WaitForExit($script:timeoutSec * 1000)
     if (-not $done) {
         & taskkill.exe /T /F /PID $p.Id 2>&1 | Out-Null
@@ -95,12 +174,22 @@ function Invoke-Native([string]$file, [string]$arguments, [string]$tag, [bool]$u
     } else {
         $p.WaitForExit()   # let the output readers finish
     }
-    $out = $outTask.Result
-    $err = $errTask.Result
+    $outEnc = "utf-8"
+    if ($utf8Out) {
+        $out = $outTask.Result
+        $err = $errTask.Result
+    } else {
+        $outTask.Wait(10000) | Out-Null
+        $errTask.Wait(10000) | Out-Null
+        $o = ConvertFrom-OutputBytes $outMem.ToArray() $null
+        $e = ConvertFrom-OutputBytes $errMem.ToArray() $null
+        $out = $o.text; $err = $e.text
+        $outEnc = "stdout " + $o.enc + ", stderr " + $e.enc
+    }
     $base = Join-Path $logDir "run-$RunId-$tag"
     [System.IO.File]::WriteAllText("$base.stderr.txt", [string]$err, $utf8)
     $code = if ($done) { $p.ExitCode } else { -1 }
-    return @{ code = $code; out = [string]$out; err = [string]$err; timedOut = (-not $done); base = $base }
+    return @{ code = $code; out = [string]$out; err = [string]$err; timedOut = (-not $done); base = $base; enc = $outEnc }
 }
 
 # git through cmd.exe (works whether git is git.exe or git.cmd), same time limit and closed stdin (PROJECT.md 18).
@@ -109,11 +198,11 @@ function Invoke-Git([string]$gitArgs, [string]$tag) {
 }
 
 # Run one claude -p stage. Stop rule (PROJECT.md 5, 14): exit code, is_error, permission_denials - not the answer text.
-function Invoke-Claude([string]$tag, [string]$prompt, [string[]]$allowed) {
+function Invoke-Claude([string]$tag, [string]$prompt, [string[]]$allowed, [string]$model, [int]$maxTurns) {
     if (-not (Test-Path -LiteralPath $claude)) { Emit $false "" "claude not found: $claude" }
     $claudeArgs = @("-p", $prompt, "--permission-mode", "dontAsk")
     if (@($allowed).Count -gt 0) { $claudeArgs += @("--allowedTools") + $allowed }   # no list = read only (Read needs no permission, PROJECT.md 16)
-    $claudeArgs += @("--permission-prompts", "none", "--output-format", "json", "--max-turns", "10", "--model", "haiku")
+    $claudeArgs += @("--permission-prompts", "none", "--output-format", "json", "--max-turns", [string]$maxTurns, "--model", $model)   # from pipeline.json (PROJECT.md 20)
     $n = Invoke-Native $claude ((@($claudeArgs) | ForEach-Object { Quote-Arg $_ }) -join " ") $tag $true
     $base = $n.base
     [System.IO.File]::WriteAllText("$base.json", $n.out, $utf8)
@@ -149,7 +238,7 @@ function Get-ReportSectionsForRun {
 # Wording fixed 2026-11-23 (PROJECT.md 18): the first version made Codex read nothing but the stdin block.
 $script:stdinNote = "The stdin block after this prompt holds the exact UTF-8 text of TASK.md, and for stage 5 also this run's REPORT.md sections. " +
                     "Use that text as the true wording of those files, because Korean text may look broken when you read files through the shell. " +
-                    "This is only a copy of those documents: still read the code, the runs files and any other files yourself."
+                    "This is only a copy of those documents: still read the code, the output files and any other files yourself."
 
 # Run one codex exec check (read-only). Codex only answers; this script writes the review file (PROJECT.md 4).
 # Invocation as in codex-usage-test.ps1 (PROJECT.md 8). Plain words only in prompts: codex.cmd goes through cmd.exe.
@@ -206,6 +295,13 @@ try {
         Emit $false "" "real $Stage is not implemented yet (no AI call made)"
     }
 
+    # Project settings. The end stage still runs with broken settings so the stop is recorded in RESULT.
+    $cfg = Read-PipelineConfig
+    if ($cfg.error -and $Stage -ne "end") { Emit $false "" ("pipeline.json: " + $cfg.error) }
+    $script:timeoutSec = Get-StageTimeout $Stage
+    $codeList = ($cfg.codePaths -join ", ")
+    $outList  = if (@($cfg.outputPaths).Count -gt 0) { ($cfg.outputPaths -join ", ") } else { "none listed" }
+
     switch ($Stage) {
         "s0" {
             # Pre-check: required files, and both CLIs runnable from n8n. Version/login checks are not AI calls.
@@ -239,13 +335,16 @@ try {
             $note += "; git=" + (OneLine $g1.out) + " (exit " + $g1.code + "); head=" + $(if ($g2.code -eq 0) { "ok" } else { "no commit (exit " + $g2.code + ")" }) +
                      "; author=" + $(if (($g3.code -eq 0) -and ($g4.code -eq 0)) { "set" } else { "missing" }) +
                      "; branch=" + (OneLine $g5.out) + "; changed before run=" + $dirty.Count
+            $note += "; settings: write=" + ($cfg.writePaths -join ",") + " model=" + $cfg.model + "/" + $cfg.maxTurns + " s6=" + $cfg.model6 + "/" + $cfg.maxTurns6 +
+                     " move=" + $(if (@($cfg.moveBeforeRun).Count -gt 0) { $cfg.moveBeforeRun -join "," } else { "none" }) + " code=" + $codeList + " out=" + $outList +
+                     " timeouts=" + $(if ($cfg.timeouts) { ($cfg.timeouts | ConvertTo-Json -Compress) } else { "default 180" })
             Emit (($c1.code -eq 0) -and ($c2.code -eq 0) -and ($c3.code -eq 0) -and $gitOk) "" $note
         }
         "s2" {
             if ($isReal) {
-                # Real develop: claude -p, may only write under work/ and REPORT.md, may not run anything (PROJECT.md 14).
+                # Real develop: claude -p, may only write the paths in pipeline.json develop.write_paths, may not run anything (PROJECT.md 14, 20).
                 $prompt = "You are stage 2 (develop) of an automated pipeline. Read TASK.md in the current folder and do what it asks. " +
-                          "Create or edit files only under work/ and the file REPORT.md. Do not run any command or code; a later stage runs it. " +
+                          "Create or edit files only in these paths: " + ($cfg.writePaths -join ", ") + ". Do not run any command or code; a later stage runs it. " +
                           "REPORT.md: add a new section at the TOP and keep any existing content below it. " +
                           "The section starts with the line: ## " + (Now) + " S2 develop (run $RunId, attempt $Attempt). " +
                           "List the files you created or changed and how each done condition in TASK.md will be checked. " +
@@ -254,7 +353,8 @@ try {
                     $prev = ".pipeline/reviews/review-$RunId-s3-" + ($Attempt - 1) + ".md"
                     $prompt += " This is attempt $Attempt. The code review blocked the previous attempt: read $prev first and fix what it says."
                 }
-                $c = Invoke-Claude "s2-$Attempt" $prompt @("Edit(./work/**)", "Edit(./REPORT.md)")
+                $allowedS2 = @($cfg.writePaths | ForEach-Object { "Edit(./" + $_ + ")" })
+                $c = Invoke-Claude "s2-$Attempt" $prompt $allowedS2 $cfg.model $cfg.maxTurns
                 Emit $c.ok "" $c.note 1 0
             }
             $f = Join-Path $fakeDir "s2-develop-$RunId-$Attempt.txt"
@@ -263,10 +363,10 @@ try {
         }
         "s3" {
             if ($isReal) {
-                $prompt = "You are a read-only code reviewer, stage 3 of an automated pipeline. Read TASK.md, then review the code in the work folder against it. " +
+                $prompt = "You are a read-only code reviewer, stage 3 of an automated pipeline. Read TASK.md, then review the code in " + $codeList + " against it. " +
                           "Do not run anything. Reply in at most 8 lines. The first line must be exactly VERDICT: PASS or VERDICT: BLOCK. " +
                           "Use BLOCK only for a problem that would break a done condition in TASK.md. Then list problems briefly, or write none. " +
-                          "This review happens BEFORE the code is run. Done conditions about run results, such as the content of files in runs or the exit code, " +
+                          "This review happens BEFORE the code is run. Done conditions about run results, such as the content of output files or the exit code, " +
                           "are checked later by stages 4 and 5: here judge only whether the code is written so that it would meet them, and do not block because run results do not exist yet."
                 $prompt += " " + $script:stdinNote
                 $in = "=== TASK.md ===`n" + (Get-FileText "TASK.md")
@@ -288,15 +388,17 @@ try {
                 if (-not $runLine) { Emit $false "" "no 'RUN:' line in TASK.md" }
                 $cmd = ($runLine -replace '^\s*RUN:\s*', '').Trim().Trim('`').Trim()
                 # Old output is MOVED (not deleted) so this run's files are new for sure, and the old ones stay as evidence (PROJECT.md 18).
-                $runsDir = Join-Path $root "runs"
+                # Only the folders in pipeline.json run.move_before_run; default none (a folder that keeps data, like image-compare runs/, must not be listed) (PROJECT.md 20).
                 $moved = 0
-                if (Test-Path -LiteralPath $runsDir) {
-                    $oldItems = @(Get-ChildItem -LiteralPath $runsDir -Force)
-                    if ($oldItems.Count -gt 0) {
-                        $prevDir = Join-Path $script:pipe ("runs-prev\" + $RunId)
-                        New-Item -ItemType Directory -Force -Path $prevDir | Out-Null
-                        foreach ($it in $oldItems) { Move-Item -LiteralPath $it.FullName -Destination $prevDir -Force; $moved++ }
-                    }
+                $prevRoot = Join-Path $script:pipe ("prev-output\" + $RunId)
+                foreach ($mv in $cfg.moveBeforeRun) {
+                    $srcDir = Join-Path $root $mv
+                    if (-not (Test-Path -LiteralPath $srcDir)) { continue }
+                    $oldItems = @(Get-ChildItem -LiteralPath $srcDir -Force)
+                    if ($oldItems.Count -eq 0) { continue }
+                    $prevDir = Join-Path $prevRoot ($mv.Trim().TrimEnd('/', '\'))
+                    New-Item -ItemType Directory -Force -Path $prevDir | Out-Null
+                    foreach ($it in $oldItems) { Move-Item -LiteralPath $it.FullName -Destination $prevDir -Force; $moved++ }
                 }
                 $started = Now
                 $n = Invoke-Native "cmd.exe" ('/d /s /c "' + $cmd + '"') "s4" $false
@@ -305,8 +407,8 @@ try {
                 $code = $n.code
                 # Raw record measured by this script, for the checkers (S5, S6) to read (PROJECT.md 18).
                 $raw = [ordered]@{ run = $RunId; command = $cmd; exit_code = $code; timed_out = $n.timedOut; started = $started; ended = $ended
-                                   stdout_file = ".pipeline/logs/run-$RunId-s4.stdout.txt"; stderr_file = ".pipeline/logs/run-$RunId-s4.stderr.txt"
-                                   moved_old_runs_files = $moved; moved_to = $(if ($moved -gt 0) { ".pipeline/runs-prev/$RunId/" } else { "" }) }
+                                   stdout_file = ".pipeline/logs/run-$RunId-s4.stdout.txt"; stderr_file = ".pipeline/logs/run-$RunId-s4.stderr.txt"; output_encoding = $n.enc
+                                   moved_from = @($cfg.moveBeforeRun); moved_files = $moved; moved_to = $(if ($moved -gt 0) { ".pipeline/prev-output/$RunId/" } else { "" }) }
                 [System.IO.File]::WriteAllText(($n.base + ".json"), ($raw | ConvertTo-Json), $utf8)
                 if ($n.timedOut) { Emit $false "" ("run timeout after " + $script:timeoutSec + "s, process tree killed: $cmd") 0 0 }
                 $outTxt = OneLine $n.out
@@ -315,11 +417,11 @@ try {
                 $sec = @(("## " + (Now) + " S4 run (run $RunId) - written by stage.ps1, no AI"), "",   # parentheses: "," binds before "+" in PowerShell
                          ("- command: " + [char]96 + $cmd + [char]96), "- exit code: $code",
                          "- stdout: $outTxt", "- stderr: $errTxt",
-                         "- moved old runs/ files: $moved", "- raw: .pipeline/logs/run-$RunId-s4.json (exit code), .stdout.txt, .stderr.txt", "")
+                         ("- moved old output files: $moved (folders: " + $(if (@($cfg.moveBeforeRun).Count -gt 0) { $cfg.moveBeforeRun -join ", " } else { "none" }) + ")"), "- raw: .pipeline/logs/run-$RunId-s4.json (exit code), .stdout.txt, .stderr.txt", "")
                 $rep = Join-Path $root "REPORT.md"
                 $old = if (Test-Path -LiteralPath $rep) { [System.IO.File]::ReadAllText($rep, $utf8) } else { "" }
                 [System.IO.File]::WriteAllText($rep, (($sec -join "`n") + "`n" + $old), $utf8)
-                Emit ($code -eq 0) "" ("ran: $cmd; exit=$code; moved old runs files=$moved; stdout=$outTxt; stderr=$errTxt") 0 0
+                Emit ($code -eq 0) "" ("ran: $cmd; exit=$code; moved old output files=$moved; stdout=$outTxt; stderr=$errTxt") 0 0
             }
             if ($Scenario -eq "fail4") { Emit $false "" "fake: simulated failure (scenario=fail4)" }
             $f = Join-Path $fakeDir "s4-run-output-$RunId.txt"
@@ -329,7 +431,7 @@ try {
         "s5" {
             if ($isReal) {
                 # Real first check: Codex compares REPORT.md claims with the actual files. BLOCK here does not stop the flow; S6 and the human judge (PROJECT.md 16).
-                $prompt = "You are a read-only checker, stage 5 of an automated pipeline. Read TASK.md, the top sections of REPORT.md, the code in the work folder, the files in the runs folder " +
+                $prompt = "You are a read-only checker, stage 5 of an automated pipeline. Read TASK.md, the top sections of REPORT.md, the code in " + $codeList + ", the output files in " + $outList + " " +
                           "and the run record .pipeline/logs/run-$RunId-s4.json (exit code measured by the pipeline script, not by an AI). " +
                           "Do not run anything. Reply in at most 8 lines. The first line must be exactly VERDICT: PASS or VERDICT: BLOCK. " +
                           "Use BLOCK if a claim in REPORT.md does not match the actual files or a done condition in TASK.md is not met. Then say briefly whether each claim matches."
@@ -349,12 +451,12 @@ try {
                 $s3Last = Get-ChildItem -LiteralPath $script:revDir -Filter "review-$RunId-s3-*.md" | Sort-Object Name | Select-Object -Last 1
                 $s3Name = if ($s3Last) { $s3Last.Name } else { "none" }
                 $prompt = "You are stage 6, the second reviewer of an automated pipeline. Do not change any file and do not run anything. " +
-                          "Read TASK.md, the code in work/, the top sections of REPORT.md, the files in runs/, the run record .pipeline/logs/run-$RunId-s4.json, and the first-round reviews " +
+                          "Read TASK.md, the code in " + $codeList + ", the top sections of REPORT.md, the output files in " + $outList + ", the run record .pipeline/logs/run-$RunId-s4.json, and the first-round reviews " +
                           ".pipeline/reviews/$s3Name (code review) and .pipeline/reviews/review-$RunId-s5.md (check of REPORT vs files). " +
                           "Answer in Korean, at most 15 lines, in this order: 1. how important each problem the reviewers raised is; " +
                           "2. problems they missed, or none; 3. a short table of points where you disagree with the stage 5 check, or none; " +
                           "4. last line exactly RECOMMEND: PASS or RECOMMEND: BLOCK, as advice for the human who decides."
-                $c = Invoke-Claude "s6" $prompt @()
+                $c = Invoke-Claude "s6" $prompt @() $cfg.model6 $cfg.maxTurns6
                 $f = Join-Path $script:revDir "review-$RunId-s6.md"
                 [System.IO.File]::WriteAllText($f, $c.result, $utf8)
                 Emit $c.ok "" ($c.note + "; review=review-$RunId-s6.md") 1 0

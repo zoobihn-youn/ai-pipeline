@@ -1,3 +1,12 @@
+## 2026-11-23T10:07:49+09:00 S4 run (run 20261123-100746) - written by stage.ps1, no AI
+
+- command: `python work/hello.py`
+- exit code: 0
+- stdout: 
+- stderr: 
+- moved old output files: 1 (folders: runs)
+- raw: .pipeline/logs/run-20261123-100746-s4.json (exit code), .stdout.txt, .stderr.txt
+
 ## 2026-11-23T09:23:45+09:00 S2 develop (run 20261123-092344, attempt 1)
 
 **만든 것 / 바꾼 것**

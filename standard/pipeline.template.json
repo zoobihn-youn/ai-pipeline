@@ -1,0 +1,23 @@
+{
+  "_comment": "STANDARD.md 5절. 경로는 프로젝트 최상위 기준, 위로 올라가는 경로(..)·절대 경로·따옴표·cmd 특수 문자(< > & | ^ %) 금지",
+  "version": 1,
+  "develop": {
+    "write_paths": ["src/**", "REPORT.md"],
+    "model": "haiku",
+    "max_turns": 10
+  },
+  "second_review": {
+    "model": "haiku",
+    "max_turns": 10
+  },
+  "run": {
+    "move_before_run": []
+  },
+  "timeouts_sec": {
+    "default": 180
+  },
+  "review": {
+    "code_paths": ["src/"],
+    "output_paths": []
+  }
+}

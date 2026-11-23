@@ -395,3 +395,71 @@
 - 결정 (2026-11-23, 사용자): 커밋·push 자동화는 v1이 아니라 고도화에서 한다. 범위는 둘 다
   1. 파이프라인 결과: ⑦ 판정을 n8n **승인 버튼 하나**로 바꾼다 (승인하면 병합·push 자동). 사람 승인 기록은 유지 (10절 원칙 유지). 확인할 것: n8n에서 git push가 노트북에 저장된 GitHub 로그인으로 되는지 (추정: 같은 Windows 계정이라 됨)
   2. 문서·스크립트 수정: 한 줄 실행 스크립트(예: `scripts/publish.ps1` — 변경 목록 표시 → 커밋 → push)로 간소화. Claude가 연결 통로에서 직접 커밋하지 않는 이유 (확인): 통로에서 파일 삭제가 막혀 git 잠금 파일 처리가 안 되고, 통로의 git은 줄바꿈 처리가 노트북과 달라 파일 전체가 바뀐 것처럼 커밋될 위험
+
+## 19. v1 종료 (2026-11-23)
+- 상태: **v1 종료**. 다음은 고도화 (대상 PoC·순서는 나중에 정함, 1절)
+- 완료 조건 (6절):
+  | 조건 | 결과 | 근거 |
+  |---|---|---|
+  | 1. [시작] 한 번으로 ②~⑥이 사람 손 없이 이어짐 | ✅ | real 전체 실행 PASS 3회 (224021, 080359, 084736) |
+  | 2. 차단 → 재작업 → 재리뷰 | ✅ | fake block1·blockall (16·17절) + 실제 Codex로도 재시도 3회 후 멈춤 확인 (092030, 의도하지 않은 시험) |
+  | 3. 실패 시 그 자리에서 멈춤 | ✅ | fake fail4, real 092030 (n8n 실패 표시 포함) |
+  | 4. 사람이 읽을 결과 보고 하나 | ✅ | RESULT.md |
+  | 5. 실행당 AI 호출 수 기록 | ✅ | run log·RESULT의 AI calls |
+- v1에서 추가로 한 것: n8n 판정 구조 18→12노드 (17절), Git 로컬 커밋·브랜치 → ⑦ 병합 → GitHub 공개 저장소 push (18절, https://github.com/zoobihn-youn/ai-pipeline), stage.ps1 보완 4개, Codex 한글 기준 문서 표준 입력 전달 (18절)
+- 고도화로 넘긴 것:
+  1. ⑦ 승인 버튼(n8n) → 병합·push 자동, 문서·스크립트 수정 커밋을 한 줄 스크립트로 (18절)
+  2. 포트폴리오용 README.md
+  3. 개발 흐름과 운영(일배치) 흐름 분리 — 코드 변경 없을 때 ②·③ 생략 (18절 보류)
+  4. Codex 셸 출력의 한글 깨짐 자체 (샌드박스 문제로 추정)
+  5. 12절 v2 후보: 로컬 LLM(Ollama) 단계, MCP 서버, Skills·AGENTS.md
+- 남은 사람 작업: 이전 18개 노드 n8n 워크플로 보관 또는 삭제
+
+## 20. v2 시작: 템플릿화 (2026-11-23)
+- 결정 (사용자):
+  1. 이 흐름을 템플릿으로 만든다. 이유: 기획·개발·검수 역할을 나눈 구조를 PoC마다 새로 만들면 품질이 들쑥날쑥해짐. 사람마다 다른 기준으로 시작하면 문제가 생김
+  2. 핵심은 **기준 문서** — 새 문서를 쓸 때 참조 문서부터 확인하듯, 새 PoC도 공용 기준을 먼저 따르고 시작한다 (fork는 예시였음)
+  3. 첫 적용 대상: image-compare (C:\dev\image-compare)
+- 방향 (Claude 제안, 세부는 합의 전): 공용 파이프라인(n8n·stage.ps1, ai-pipeline에 한 벌) + 공용 기준 문서·양식 + 프로젝트별 설정 파일. 파이프라인을 프로젝트마다 복사하지 않는 이유: 고칠 때 복사본마다 따로 고쳐야 해서 기준이 다시 갈라짐
+- PoC 원칙: 진행 중인 PoC는 ai-pipeline v2 하나. image-compare는 적용 대상이고 image-compare PoC 자체를 다시 여는 것은 아님
+- image-compare 현황 (2026-11-23 확인, 읽기만):
+  - Git 없음. 160MB·파일 1,787개. `.env`(DB 비밀번호) 있음, `.gitignore`는 `.env`·`__pycache__/`만
+  - 코드는 `plp/`·`api/`, 결과는 `data/`·`vision/`·`captures*/`·`screens/`·`runs/`, 보관용 `old/`(66MB)·`legacy/`
+  - **위험 (확인)**: image-compare는 `runs/`를 자체 수집 결과 폴더로 씀 (`runs/fr/…`, 33MB). 지금 stage.ps1의 ④는 실행 전에 `runs/` 내용을 `.pipeline/runs-prev/`로 옮김 → 그대로 적용하면 image-compare 데이터를 옮겨 버림. 설정화 전에는 image-compare에서 real ④를 돌리면 안 됨
+  - 실행 특성: 수집은 실제 사이트 접속(페이지 대기 12초)·화면 있는 브라우저, 비전은 로컬 Ollama → 3분 제한·한 줄 `RUN:`과 맞지 않음. 사이트 접속 없는 회귀 검사 명령 `python -m plp regress`가 있음
+- 결정 (2026-11-23, 사용자): image-compare는 GitHub **비공개** 저장소로 올림. 첫 시험 TASK는 Guardrails "비전 설명 문장의 값이 실제 측정값과 맞는지 검사" + `python -m plp regress`로 확인 (사이트 접속·Ollama 없이). 기준 문서는 HTML 초안 없이 바로 파일로
+- 진행 순서: ① 기준 문서 → ② 설정 파일화(stage.ps1이 pipeline.json을 읽게) → ③ image-compare 적용
+- ✅ ① 기준 문서 작성 (2026-11-23): `standard/` — STANDARD.md v1.0 (역할·검수 독립성·문서·TASK 작성 규칙·판정·Git·사용량·기록), TASK.template.md(완료 조건에 확인 방법·확인 단계 열), PROJECT.template.md("기준 예외" 절), pipeline.template.json(안), gitignore.template, NEW-PROJECT-CHECKLIST.md. v1에서 확인된 규칙만 옮김, pipeline.json은 "안"으로 표시
+- ✅ ② 설정 파일화 (2026-11-23, 백업 없음 — 직전 버전은 Git 커밋 a50ac1d에 있음):
+  - stage.ps1이 `<PROJECT_ROOT>/pipeline.json`을 읽음: ② 쓰기 경로(허용 도구로 변환)·모델·턴 수, ⑥ 모델·턴 수, 단계별 시간 제한, ④ 실행 전에 옮길 폴더, 검수 지시문에 들어갈 코드·결과 위치. 파일이 없거나 잘못되면 S0에서 멈춤(결과 기록은 계속 돎). S0 기록에 읽은 설정을 남김
+  - 경로 검사: 상대 경로만, `..`·절대 경로·따옴표·cmd 특수 문자 금지, write_paths에 REPORT.md 필수, move_before_run에 `.`·`.git`·`.pipeline` 금지
+  - 이전 출력을 옮기는 곳이 `.pipeline/runs-prev/<runId>/` → `.pipeline/prev-output/<runId>/<폴더>/`로 바뀜 (여러 폴더 지원). 기존 runs-prev는 그대로 둠
+  - ai-pipeline 자신의 `pipeline.json`: v1과 같은 값 (work/**·REPORT.md, haiku/10, runs 옮김, 180초)
+  - STANDARD.md v1.1: 5절을 "안"에서 구현 내용(키·기본값·경로 규칙)으로 확정, 양식에 second_review 추가
+  - 시험 (이 채팅 작업 공간, 대역 claude·codex·cmd, AI 0회): 문법 오류 0. ai-pipeline 설정으로 ② 허용 도구·모델·턴 수·③⑤⑥ 지시문의 경로가 이전과 같음, ④가 runs/를 옮김. image-compare식 설정(plp/**, sonnet/30, 옮김 없음, s4 900초)으로 runs/가 그대로 남음, ⑥ 모델 따로 적용, 단계별 시간 제한 적용. 잘못된 설정 7종 모두 S0/해당 단계에서 멈춤, 파일 없음도 멈춤
+  - 노트북 확인 (예정): fake 4개 + `real:s4`(AI 0회, 옮기기 경로 확인)
+  - ✅ 노트북 확인 (2026-11-23, AI 0회): fake 4개(100346·100404·100420·100434) 결과가 17절과 같음, S0 기록에 settings 줄 정상. `real:s4`(100746): runs/output.txt → `.pipeline/prev-output/20261123-100746/runs/output.txt`로 옮긴 뒤 새로 생성, s4.json에 moved_from·moved_files 기록, REPORT 줄 "moved old output files: 1 (folders: runs)" → **② 설정 파일화 완료**
+- 결정 (2026-11-23, 사용자): 3단계(image-compare 적용)를 먼저 끝냄 → 그다음 채팅용 스킬 만들기 + task-observer 시험 (목적: 토큰 사용량 줄이기, 반복 작업 스킬화)
+- ③ image-compare 적용 진행 (2026-11-23):
+  - ✅ `.gitignore` (백업 `.gitignore.bak-20261123`): 코드·문서만 → 50개 파일, 약 566KB (계산, git status 확인 전). `.env` 제외 확인
+  - ✅ image-compare PROJECT.md v0.25 (백업 `PROJECT.md.bak-20261123`): 맨 위 "기준: STANDARD.md v1.1", 13절 "ai-pipeline 적용"(Git 범위, 비공개, 기준 예외 2건: runs/는 누적 데이터라 옮기기 금지, 이전 TASK는 old/로)
+  - 발견 (확인): 첫 시험 TASK로 정한 Guardrails ①("비전 설명 문장의 값이 실제 측정값과 맞는지")은 `plp/vision3.py`의 `guard_explain`으로 **이미 구현돼 있음** (실제값·기준값이 문장에 있는지, 입력에 없는 숫자·색 코드, 한국어 여부 검사, 실패 시 1번 재요청 후 대체). 3단계 설명 결과 28건(대체 0, 재요청 0). 다만 테스트 코드는 없고, B2 [수집] 경로(worker)에서는 설명을 만들지 않음 → PROJECT.md 12절의 "미완료" 뜻을 사용자에게 확인 필요
+  - 결정 (2026-11-23, 사용자): 첫 시험 TASK는 **A안 — guard_explain 단위 테스트 추가** (12절 Guardrails ①의 뜻 = 테스트로 검증 가능하게 만들기). ②·⑥ 모델은 **Haiku**(사용량 절약), 최대 턴 20
+  - ✅ image-compare TASK.md (STANDARD 양식): tests/test_guard_explain.py에 8가지 경우(정상·빈 답·영어·실제값 빠짐·기준값 빠짐·숫자 지어냄·색 코드 지어냄·색 코드+한글 조사), plp/ 코드 변경 금지, `RUN: python -m unittest discover -s tests -v && python -m plp regress`. 이전 TASK는 `old/TASK_B2단계_수집버튼_진행상황.md`로 옮김
+  - ✅ image-compare pipeline.json: 쓰기 `tests/**`·`REPORT.md`, haiku/20(②·⑥), 옮김 없음, 기본 180초·④ 300초, 검수 코드 위치 `plp/`·`tests/`
+  - 참고 (사용자 질문): 수집을 10장→2장으로 줄이면 B안(수집 경로 시험)의 실행 시간이 크게 줄어듦 (페이지 대기 12초·비전 1장 최대 120초가 장수에 비례). Claude 토큰과는 거의 무관 (수집·판정·비전은 노트북 코드와 로컬 Ollama). 20장은 딱지 종류가 골고루 들어가게 고른 것이라 2장은 판정 범위가 좁아짐. B안을 할 때 적용
+  - ✅ image-compare 준비 (2026-11-23, 사람): python에 requests·Pillow 있음, `git status` 16개 항목(.env·data·captures·old 없음) → 첫 커밋 "image-compare baseline (ai-pipeline v2)", GitHub 비공개 https://github.com/zoobihn-youn/image-compare push (처음 원격 주소를 저장소 이름만 넣어 실패 → `git remote set-url`로 고침). n8n을 `start-n8n.ps1 -ProjectRoot C:\dev\image-compare`로 재시작
+  - ✅ image-compare fake pass (run 20261123-103329, AI 0회): S0 기록에 python 3.12.10·git·head=ok·작성자·branch=main·변경 0개·settings(write=tests/**,REPORT.md, haiku/20, move=none, code=plp/, tests/, s4 300초) 정상, 끝까지 PASS. `.pipeline/`이 생겼고 Git 변경으로 잡히지 않음(.gitignore), `runs/fr/` 그대로
+  - ✅ image-compare 첫 real (run 20261123-103437, 10:34:37~10:36:36 약 2분, Claude 2·Codex 2): S0 → ② (Haiku 10턴) → ③ PASS → ④ 8개 테스트 통과 + 회귀 검사 kr 20/0·it 7/13·es 10/10, 종료 코드 0 → ⑤ PASS → ⑥ RECOMMEND PASS → `run/20261123-103437`에 커밋 c7c692a (REPORT.md·RESULT.md·tests/test_guard_explain.py, plp/ 변경 없음)
+    - 토큰 (②): cache_write 52,256 / cache_read 360,613 / output 7,724. (⑥): 37,118 / 257,711 / 6,711. v1 더미(② 36k/152k)의 약 2배 — 큰 코드를 읽은 영향 (추정)
+    - ⑤가 git status로 plp/ 변경 없음을 확인함
+    - ⑥ 지적 (확인): ① ④ 출력의 "회귀 검사: 통과"가 `?뚭? 寃?? ?듦낵`로 깨짐 — 파이썬이 UTF-8로 낸 출력을 stage.ps1이 CP949로 읽은 것으로 추정 (④는 utf8Out=false). 판정은 종료 코드라 영향 없음. ② 테스트 04~07은 assertIn이라 다른 오류가 함께 나와도 통과 (TASK의 "포함" 기대에는 맞음). ③ ⑤의 "회귀 출력이 기대값과 일치" 표현 정정 제안 → 2차 검수가 1차를 검증함
+    - ⑥ 착오 (확인): "`.gitignore`에 `__pycache__/`만 있다"고 씀 — 실제 .gitignore는 결과물 폴더까지 포함. 백업 파일(.gitignore.bak-20261123)을 읽은 것으로 추정. 결론에는 영향 없음
+    - 남은 일: ⑦ 판정(병합·push), ④ 출력 인코딩 보완 여부
+  - ✅ ④ 출력 한글 깨짐 수정 (2026-11-23, 사용자 결정): ④는 출력을 바이트로 받아 **UTF-8로 먼저 읽고, UTF-8이 아니면 Windows ANSI 코드페이지(한국어 Windows는 CP949)로** 읽음. 어느 쪽인지 s4.json `output_encoding`에 기록. AI 도구·git 호출(UTF-8)은 그대로. 이유: ④ 명령은 프로젝트마다 다르고 프로그램마다 출력 인코딩이 다름 (파이썬 UTF-8, cmd 기본 명령 CP949)
+    - 시험 (작업 공간, AI 0회): UTF-8 한글 → utf-8, CP949 한글 → codepage 949로 둘 다 정상, 영문·빈 출력 정상. 한글을 출력하는 ④ 실행에서 stdout·stderr 파일·REPORT 줄 모두 한글 정상. 문법 오류 0
+    - 노트북 확인: image-compare ⑦ 병합 뒤 `real:s4` (AI 0회) — "회귀 검사: 통과"가 정상으로 남는지
+  - ✅ 노트북 확인 (image-compare `real:s4`, run 20261123-110711, AI 0회): stdout 파일·REPORT 줄에 "회귀 검사: 통과" 정상, `output_encoding` = stdout utf-8. 그 전 실행(110604)은 설정 칸을 바꿔 넣어(scenario=`real:s4`, mode=`real`) 입력값 검사로 S0에서 멈춤 — 입력값 검사가 실제로 막은 첫 사례. mode=`real`이었으므로 scenario가 정상 값이었다면 전체 real(AI 4회)이 돌 뻔함
+  - ✅ image-compare ⑦ 판정 (사람): 승인, main 병합·push (main = c7c692a)
+- ✅ **③ image-compare 적용 완료 (2026-11-23)**: 기준 문서 → 설정 파일화 → 다른 프로젝트 적용까지 확인. 공용 파이프라인 한 벌로 ai-pipeline과 image-compare 두 프로젝트가 같은 기준으로 돎
+  - 다음 (20절 결정): 채팅용 스킬 만들기 + task-observer 시험

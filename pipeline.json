@@ -1,0 +1,23 @@
+{
+  "_comment": "ai-pipeline 자신의 설정 (STANDARD.md 5). v1 동작과 같은 값",
+  "version": 1,
+  "develop": {
+    "write_paths": ["work/**", "REPORT.md"],
+    "model": "haiku",
+    "max_turns": 10
+  },
+  "second_review": {
+    "model": "haiku",
+    "max_turns": 10
+  },
+  "run": {
+    "move_before_run": ["runs"]
+  },
+  "timeouts_sec": {
+    "default": 180
+  },
+  "review": {
+    "code_paths": ["work/"],
+    "output_paths": ["runs/"]
+  }
+}
