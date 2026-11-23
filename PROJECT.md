@@ -363,3 +363,35 @@
   - 참고 (확인): 병합 뒤 작업 폴더 파일이 CRLF로 바뀜 — Windows git의 줄바꿈 자동 변환(autocrlf)으로 추정. 내용 변경은 없음(autocrlf 기준 git status 깨끗)
   - 참고: `refs/agents/…` "Agent host session" 커밋 3개가 있음. 파이프라인과 무관하고 main 이력에 없음. 노트북의 다른 AI 도구가 남긴 체크포인트로 추정(출처 미확인). main만 push하면 올라가지 않음
 - GitHub (2026-11-23): 공개 저장소 https://github.com/zoobihn-youn/ai-pipeline 생성됨. 저장소에 README.md 커밋 1개가 이미 있어(GitHub 화면 확인) 로컬 main과 이력이 달라 그냥 push하면 거절됨 → 처리 방법 결정 필요
+- 한글 깨짐 (2026-11-23 조사):
+  - 로그 파일: 해결됨 (확인). 읽을 수 없는 로그 5개는 모두 11/22 초기의 PowerShell `2>` 리디렉션(UTF-16) 파일. Invoke-Native 도입 뒤 stderr는 전부 UTF-8, 깨진 글자 없음 → 16절 "PowerShell 오류 메시지 한글 깨짐"은 종료
+  - **Codex가 한글을 못 읽음 (확인, 현재 문제)**: ③·⑤ 기록의 `Get-Content TASK.md` 결과가 `?�업`처럼 깨짐. `-Encoding UTF8`로 다시 읽어도 깨짐 → 읽기보다 PowerShell 5.1의 출력 인코딩(CP949)을 Codex가 UTF-8로 해석해서 생기는 문제로 추정. 영향: ③·⑤가 TASK.md의 한글 완료 조건을 못 본 채 영어 부분(RUN·파일·코드)만으로 판단했을 가능성. ②·⑥ Claude Code는 자체 읽기 도구라 문제없음 (⑥ 한글 인용 정확)
+  - 결정 (사용자): C안 — 사용자 PowerShell 프로필에 UTF-8 출력 설정 (노트북의 모든 PowerShell 창에 적용, 사용자 동의). 이유: 모델이 지시를 따르는지와 무관하게 적용됨. Codex는 `powershell.exe -Command`를 프로필을 읽는 방식으로 실행함 (기록 확인). stage.ps1은 `-NoProfile`로 실행되므로 영향 없음
+  - 확인 방법: n8n mode=`real:s3`(Codex 1회, 나머지 fake) → ③ 기록의 Get-Content 결과에 한글이 정상인지
+  - ❌ C안 시험 (run 20261123-091443, mode=real:s3, Codex 1회): 여전히 깨짐. 프로필의 `Get-Content` 기본 인코딩도 적용되지 않음 → Codex가 실행한 PowerShell에 프로필이 적용되지 않은 것으로 봄
+    - 조사 (codex 0.166.0 Windows 실행 파일의 문자열, 확인): Codex는 PowerShell 명령 앞에 이미 `try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}`를 붙이는 코드를 갖고 있음. 그런데도 깨짐 → 콘솔이 없는 상태(샌드박스 실행)라 이 설정이 오류로 무시되는 것으로 추정. 프로필에 넣은 같은 줄도 같은 이유로 효과가 없었을 가능성이 큼
+    - 결론: PowerShell 출력 인코딩을 바꾸는 방식(A·B·C)으로는 해결이 어려움 (추정, 근거 위와 같음)
+  - 결정 (사용자): 1번 — stage.ps1이 TASK.md(③·⑤)와 이번 실행의 REPORT.md 섹션(⑤)을 UTF-8로 읽어 Codex의 표준 입력으로 넘긴다. 프로필 세 줄은 평소 PowerShell 창에서 정상(65001, 한글 정상)이라 그대로 둠
+    - 근거 (확인): codex 0.166.0 도움말 문구 "If stdin is piped and a prompt is also provided, stdin is appended as a `<stdin>` block"
+    - 구현: Invoke-Native에 표준 입력 텍스트 인자 추가 (UTF-8 바이트를 직접 씀, BOM 없음). 지시문에 "stdin 블록의 글이 실제 내용이고 셸로 읽으면 한글이 깨져 보일 수 있다" 한 문장 추가. 넘긴 내용은 `.pipeline/logs/run-<runId>-s3-<시도>.stdin.txt`, `-s5.stdin.txt`에 남김. 역할·읽기 전용 권한은 그대로
+    - 시험 (이 채팅 작업 공간, 대역 Codex): 받은 표준 입력이 저장본과 같고 한글 정상, UTF-8·BOM 없음. ⑤는 이번 실행의 REPORT 섹션만 받음(이전 실행 섹션 제외). fake는 영향 없음
+    - 노트북 확인: n8n mode=`real:s3` (Codex 1회) → ③ 리뷰가 한글 완료 조건을 언급하는지, `.stdin.txt` 한글 정상인지
+  - 노트북 확인 (run 20261123-092030, mode=real:s3, **Codex 3회** — BLOCK이 나서 재시도 규칙대로 3회까지 감):
+    - ✅ 한글 전달 확인: `.stdin.txt` 한글 정상. 2·3회차 리뷰가 "완료 조건 3"을 한글로 인용함 → Codex가 표준 입력으로 한글 완료 조건을 읽음. 셸로 읽은 결과는 여전히 깨짐 (예상대로)
+    - ✅ 재시도 규칙: BLOCK 3회 → 멈춤, 결과 기록·n8n 실패 표시 정상
+    - 발견 1 (지시문): 1회차는 파일을 하나도 읽지 않고 "주어진 글에 TASK.md만 있다"며 BLOCK → 추가한 문장("stdin 블록이 실제 내용")을 Codex가 "이것만 보라"로 해석함. Claude 지시문 작성 실수
+    - 발견 2 (시험 구성): 2·3회차 BLOCK 이유는 완료 조건 3 (REPORT.md 맨 위에 무엇을 만들었는지 없음). real:s3는 ②가 가짜라 이번 실행의 REPORT 섹션이 없음 → 이 시험 구성에서는 BLOCK이 맞는 판단. Codex가 한글 조건을 읽게 되면서 드러남
+    - 발견 3 (③의 범위): 1회차가 "runs/output.txt 내용을 확인할 수 없다"를 BLOCK 이유로 씀. ③은 실행 전 코드 리뷰라 실행 결과 조건은 ④·⑤에서 확인할 일 → ③ 지시문에 범위를 적을 필요 (추정)
+  - 지시문 수정 (2026-11-23, 사용자 승인, 역할·권한 그대로):
+    1. 표준 입력 안내: "stdin 블록은 TASK.md(⑤는 이번 실행 REPORT 섹션 포함)의 정확한 글이다. 셸로 읽으면 한글이 깨질 수 있으니 그 글을 기준으로 하라. 이것은 문서 사본일 뿐이니 코드·runs·다른 파일은 직접 읽어라"
+    2. ③ 범위: "이 리뷰는 코드 실행 전이다. 실행 결과 조건(runs 파일 내용, 종료 코드)은 ④·⑤에서 확인하니 여기서는 코드가 그 조건을 만족하도록 쓰였는지만 판단하고, 실행 결과가 아직 없다는 이유로 BLOCK하지 마라"
+    - 대역 시험: 문법 오류 0, 새 문장이 Codex 명령 줄에 들어감, cmd 특수 문자(< > & | ^) 없음
+    - 확인 계획: mode=`real:s2,s3` (②가 실제라 이번 실행 REPORT 섹션이 생김). Claude 1·Codex 1 이상
+  - ✅ 확인 (run 20261123-092344, mode=real:s2,s3, Claude 1·Codex 1): ② 실제(hello.py 변경 없음, REPORT 섹션 추가) → ③ 1회차 PASS → 끝까지 정상
+    - 수정 1 효과 (확인): ③이 셸로 파일을 직접 읽음 (`Get-ChildItem`, `work/hello.py`, `REPORT.md`)
+    - 수정 2 효과 (추정): 실행 결과가 없다는 이유의 BLOCK이 사라짐. 1회 시험이라 근거는 약함
+    - 리뷰 본문이 "none" 한 줄이라, 이번 판단에 한글 완료 조건을 썼는지는 리뷰로 확인 안 됨. 한글 조건을 읽는 것 자체는 run 092030에서 확인됨 (조건 3 인용)
+  - 한글 깨짐 항목 결론: 로그는 해결(이전), Codex의 한글 기준 문서 읽기는 표준 입력 전달로 해결. 셸 출력 깨짐 자체는 남아 있음 (Codex 샌드박스 문제로 추정, v1 범위 밖)
+- 결정 (2026-11-23, 사용자): 커밋·push 자동화는 v1이 아니라 고도화에서 한다. 범위는 둘 다
+  1. 파이프라인 결과: ⑦ 판정을 n8n **승인 버튼 하나**로 바꾼다 (승인하면 병합·push 자동). 사람 승인 기록은 유지 (10절 원칙 유지). 확인할 것: n8n에서 git push가 노트북에 저장된 GitHub 로그인으로 되는지 (추정: 같은 Windows 계정이라 됨)
+  2. 문서·스크립트 수정: 한 줄 실행 스크립트(예: `scripts/publish.ps1` — 변경 목록 표시 → 커밋 → push)로 간소화. Claude가 연결 통로에서 직접 커밋하지 않는 이유 (확인): 통로에서 파일 삭제가 막혀 git 잠금 파일 처리가 안 되고, 통로의 git은 줄바꿈 처리가 노트북과 달라 파일 전체가 바뀐 것처럼 커밋될 위험

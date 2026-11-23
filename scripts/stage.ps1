@@ -67,7 +67,8 @@ function Quote-Arg([string]$a) {
 
 # Start a program with stdin closed at once, read its output, and kill the whole process tree if it runs past the limit.
 # $file = program, $arguments = one command-line string, $tag = log name part, $utf8Out = decode output as UTF-8.
-function Invoke-Native([string]$file, [string]$arguments, [string]$tag, [bool]$utf8Out) {
+# $stdinText (optional) is written to the program's stdin as UTF-8 bytes, then stdin is closed (PROJECT.md 18: Korean text for Codex).
+function Invoke-Native([string]$file, [string]$arguments, [string]$tag, [bool]$utf8Out, [string]$stdinText = "") {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $file
     $psi.Arguments = $arguments
@@ -78,6 +79,12 @@ function Invoke-Native([string]$file, [string]$arguments, [string]$tag, [bool]$u
     $psi.RedirectStandardError = $true
     if ($utf8Out) { $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8 }
     $p = [System.Diagnostics.Process]::Start($psi)
+    if ($stdinText) {
+        # Raw UTF-8 bytes on the base stream: the StreamWriter would use the console code page (CP949) on Windows PowerShell 5.1.
+        $bytes = $utf8.GetBytes($stdinText)
+        $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+        $p.StandardInput.BaseStream.Flush()
+    }
     $p.StandardInput.Close()   # codex exec otherwise waits for more input forever under n8n (PROJECT.md 16)
     $outTask = $p.StandardOutput.ReadToEndAsync()
     $errTask = $p.StandardError.ReadToEndAsync()
@@ -120,16 +127,41 @@ function Invoke-Claude([string]$tag, [string]$prompt, [string[]]$allowed) {
     return @{ ok = $ok; result = [string]$r.result; note = ("claude exit=$code is_error=" + $r.is_error + " denials=$denials turns=" + $r.num_turns + "; json=" + (Split-Path -Leaf "$base.json")) }
 }
 
+# Korean text for Codex (PROJECT.md 18): Codex reads files through Windows PowerShell in its sandbox and gets Korean broken (CP949 vs UTF-8).
+# So the script reads the UTF-8 files itself and gives the exact text on stdin; codex exec appends piped stdin to the prompt as a stdin block.
+function Get-FileText([string]$name) {
+    $f = Join-Path $root $name
+    if (Test-Path -LiteralPath $f) { return [System.IO.File]::ReadAllText($f, $utf8) }
+    return "(missing)"
+}
+function Get-ReportSectionsForRun {
+    # Sections of REPORT.md written in this run: headings that contain "(run <RunId>".
+    $text = Get-FileText "REPORT.md"
+    $out = New-Object System.Collections.Generic.List[string]
+    $keep = $false
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line -match '^## ') { $keep = $line.Contains("(run $RunId") }
+        if ($keep) { $out.Add($line) }
+    }
+    if ($out.Count -eq 0) { return "(no section for run $RunId)" }
+    return ($out -join "`n")
+}
+# Wording fixed 2026-11-23 (PROJECT.md 18): the first version made Codex read nothing but the stdin block.
+$script:stdinNote = "The stdin block after this prompt holds the exact UTF-8 text of TASK.md, and for stage 5 also this run's REPORT.md sections. " +
+                    "Use that text as the true wording of those files, because Korean text may look broken when you read files through the shell. " +
+                    "This is only a copy of those documents: still read the code, the runs files and any other files yourself."
+
 # Run one codex exec check (read-only). Codex only answers; this script writes the review file (PROJECT.md 4).
 # Invocation as in codex-usage-test.ps1 (PROJECT.md 8). Plain words only in prompts: codex.cmd goes through cmd.exe.
 # Stop rule for Codex (PROJECT.md 5, 8, 11): exit code, turn.failed/error event, or no verdict line.
-function Invoke-Codex([string]$tag, [string]$prompt, [string]$reviewName) {
+function Invoke-Codex([string]$tag, [string]$prompt, [string]$reviewName, [string]$stdinText = "") {
     if (-not (Test-Path -LiteralPath $codex)) { Emit $false "" "codex not found: $codex" }
     $last = Join-Path $logDir "run-$RunId-$tag.last.txt"
     $codexArgs = @("exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "--json", "-o", $last, $prompt)
     $argStr = (@($codexArgs) | ForEach-Object { Quote-Arg $_ }) -join " "
     # codex.cmd is a batch file, so it runs through cmd.exe (/s /c strips only the outer quotes).
-    $n = Invoke-Native "cmd.exe" ('/d /s /c "' + (Quote-Arg $codex) + ' ' + $argStr + '"') $tag $true
+    if ($stdinText) { [System.IO.File]::WriteAllText((Join-Path $logDir "run-$RunId-$tag.stdin.txt"), $stdinText, $utf8) }   # what Codex was given
+    $n = Invoke-Native "cmd.exe" ('/d /s /c "' + (Quote-Arg $codex) + ' ' + $argStr + '"') $tag $true $stdinText
     [System.IO.File]::WriteAllText(($n.base + ".jsonl"), $n.out, $utf8)
     if ($n.timedOut) { Emit $false "" ("codex timeout after " + $script:timeoutSec + "s, process tree killed") 0 1 }
     $failed = $false
@@ -233,8 +265,12 @@ try {
             if ($isReal) {
                 $prompt = "You are a read-only code reviewer, stage 3 of an automated pipeline. Read TASK.md, then review the code in the work folder against it. " +
                           "Do not run anything. Reply in at most 8 lines. The first line must be exactly VERDICT: PASS or VERDICT: BLOCK. " +
-                          "Use BLOCK only for a problem that would break a done condition in TASK.md. Then list problems briefly, or write none."
-                $c = Invoke-Codex "s3-$Attempt" $prompt "review-$RunId-s3-$Attempt.md"
+                          "Use BLOCK only for a problem that would break a done condition in TASK.md. Then list problems briefly, or write none. " +
+                          "This review happens BEFORE the code is run. Done conditions about run results, such as the content of files in runs or the exit code, " +
+                          "are checked later by stages 4 and 5: here judge only whether the code is written so that it would meet them, and do not block because run results do not exist yet."
+                $prompt += " " + $script:stdinNote
+                $in = "=== TASK.md ===`n" + (Get-FileText "TASK.md")
+                $c = Invoke-Codex "s3-$Attempt" $prompt "review-$RunId-s3-$Attempt.md" $in
                 Emit $c.ok $c.verdict $c.note 0 1
             }
             $v = "PASS"
@@ -297,7 +333,9 @@ try {
                           "and the run record .pipeline/logs/run-$RunId-s4.json (exit code measured by the pipeline script, not by an AI). " +
                           "Do not run anything. Reply in at most 8 lines. The first line must be exactly VERDICT: PASS or VERDICT: BLOCK. " +
                           "Use BLOCK if a claim in REPORT.md does not match the actual files or a done condition in TASK.md is not met. Then say briefly whether each claim matches."
-                $c = Invoke-Codex "s5" $prompt "review-$RunId-s5.md"
+                $prompt += " " + $script:stdinNote
+                $in = "=== TASK.md ===`n" + (Get-FileText "TASK.md") + "`n`n=== REPORT.md sections of this run ===`n" + (Get-ReportSectionsForRun)
+                $c = Invoke-Codex "s5" $prompt "review-$RunId-s5.md" $in
                 Emit $c.ok $c.verdict $c.note 0 1
             }
             $f = Write-Review "review-$RunId-s5.md" "PASS" "fake check of REPORT vs runs (scenario=$Scenario)"
