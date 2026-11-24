@@ -236,9 +236,12 @@ function Get-ReportSectionsForRun {
     return ($out -join "`n")
 }
 # Wording fixed 2026-11-23 (PROJECT.md 18): the first version made Codex read nothing but the stdin block.
+# Added 2026-11-23 (PROJECT.md 21, item D): shell output stays broken even with pwsh, so say it is a known limit and ask for a not-checked list.
 $script:stdinNote = "The stdin block after this prompt holds the exact UTF-8 text of TASK.md, and for stage 5 also this run's REPORT.md sections. " +
                     "Use that text as the true wording of those files, because Korean text may look broken when you read files through the shell. " +
-                    "This is only a copy of those documents: still read the code, the output files and any other files yourself."
+                    "This is only a copy of those documents: still read the code, the output files and any other files yourself. " +
+                    "Korean text in other files and in command output may also look broken in the shell. Do not treat broken-looking characters as a defect. " +
+                    "Where you could not check Korean text such as strings, patterns or messages because it looked broken, list it in your answer as not checked."
 
 # Run one codex exec check (read-only). Codex only answers; this script writes the review file (PROJECT.md 4).
 # Invocation as in codex-usage-test.ps1 (PROJECT.md 8). Plain words only in prompts: codex.cmd goes through cmd.exe.

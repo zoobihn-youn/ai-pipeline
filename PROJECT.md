@@ -1,4 +1,4 @@
-# PROJECT.md — AI 협업 자동화 PoC (ai-pipeline) v0.6 초안 (2026-11-23 n8n 판정 구조 간소화, 17절)
+# PROJECT.md — AI 협업 자동화 PoC (ai-pipeline) v0.7 (2026-11-23 v2 종료·v3 고도화 시작, 21절)
 
 ## 1. 목적
 - 한 단계가 끝나면 다음 단계의 AI가 **사람의 복사·붙여넣기 없이** 자동으로 일을 시작하는지 확인한다.
@@ -463,3 +463,50 @@
   - ✅ image-compare ⑦ 판정 (사람): 승인, main 병합·push (main = c7c692a)
 - ✅ **③ image-compare 적용 완료 (2026-11-23)**: 기준 문서 → 설정 파일화 → 다른 프로젝트 적용까지 확인. 공용 파이프라인 한 벌로 ai-pipeline과 image-compare 두 프로젝트가 같은 기준으로 돎
   - 다음 (20절 결정): 채팅용 스킬 만들기 + task-observer 시험
+
+## 21. v2 종료 · v3 시작: 템플릿을 활용한 고도화 (2026-11-23)
+- v2 상태: **종료** (사용자 결정 2026-11-23). 한 것: ① 기준 문서(`standard/`, STANDARD.md v1.1) → ② 설정 파일화(pipeline.json) → ③ image-compare 적용(real 전체 1회 PASS, ⑦ 병합·push) (20절)
+- 미룬 것 (사용자 결정): 채팅용 스킬 만들기(`/check` 검증 등)·task-observer 시험 → 고도화 뒤로. 이유: 고도화를 먼저 하고 싶음
+- v3 범위 (사용자 결정): 19절 "고도화로 넘긴 것" 중 A·C·D. 작업 효율(사람 손·사용량 줄이기)이 먼저, 포트폴리오 쪽(README·MCP·Ollama 단계)은 뒤
+
+  | 순서 | 항목 | 내용 | 19절 번호 |
+  |---|---|---|---|
+  | 1 | D | Codex 셸 출력의 한글 깨짐 | 4 |
+  | 2 | A | ⑦ 판정을 n8n 승인 버튼으로 → 병합·push 자동, 문서·스크립트 수정 커밋을 한 줄 스크립트로 | 1 |
+  | 3 | C | 개발 흐름과 운영(일배치) 흐름 분리 — 코드 변경이 없으면 ②·③ 생략 | 3 |
+
+- 순서 이유 (Claude 제안, 사용자 수용): D는 작아서 먼저, A는 매 실행 끝의 사람 작업을 줄임, C는 구조 변경이 가장 커서 마지막
+- C 시험 대상 (Claude 제안, 미확정): image-compare. 이유: 지금까지 파이프라인 ④는 테스트·회귀 검사만 돌렸고, 실제 수집 → 판정 → 비전 경로는 파이프라인으로 돈 적 없음 (20절). 운영 흐름이 바로 그 경우. 수집 장수 축소(10장 → 2장, 20절 참고)와 함께 검토
+- D 먼저 확인할 것: 원인은 Codex Windows 샌드박스로 **추정** (19절). 고칠 수 있는 범위인지부터 확인하고, 안 되면 지금 방식(기준 문서는 표준 입력으로 전달, STANDARD.md 2절)으로 둘지 결정
+- 진행 중 PoC: ai-pipeline v3 하나
+- D 조사 (2026-11-23, AI 0회, 실행 기록 읽기):
+  - 확인: image-compare real(103437)의 Codex 셸 명령 5개 출력 모두 깨짐. 깨지는 곳 두 군데 — ① PowerShell 5.1 `Get-Content`가 BOM 없는 UTF-8 파일을 CP949로 읽음 ② 출력을 CP949로 내보내는데 Codex는 UTF-8로 해석. 두 변환이 대부분 상쇄돼 한글이 일부만 맞게 보임(손실된 글자는 복구 불가)
+  - 영향: TASK·REPORT는 표준 입력이라 정상. 코드 속 한글·④ 출력은 Codex가 깨진 채 읽음 → 한글 많은 코드의 ③·⑤ 정확도 저하 가능 (추정)
+  - 같은 증상 외부 보고 있음 (OpenAI·Cursor 포럼, 한국어·중국어·러시아어 Windows). 원인 설명 같음: PowerShell 5.1의 ANSI 기본값
+  - 해결 후보: 1안 PowerShell 7(pwsh, 기본 UTF-8) 설치 — Codex CLI가 pwsh를 쓰는지는 **미확인** / 2안 Windows "UTF-8 베타" 시스템 설정 — 노트북 전체 영향 / 3안 유지
+  - 결정 (사용자): 1안부터 시험. 노트북에 pwsh 없음 (`where.exe pwsh` 결과 없음, 확인)
+  - 1안 시험 (run 20261123-150844, mode=real:s3, Codex 1회, PASS):
+    - 확인: pwsh 설치(`C:\Users\apter\AppData\Local\Microsoft\WindowsApps\pwsh.exe`) 후 n8n 재시작 → Codex가 **pwsh.exe로 명령 실행** (이전 powershell.exe). Codex CLI는 PATH에 pwsh가 있으면 pwsh를 고름
+    - 확인: **한글은 여전히 깨짐** — REPORT.md 읽은 출력에 대체 문자(�) 540개, 깨진 모양이 5.1 때와 같음(`?�번 ?�행?�서`). 원본 파일은 UTF-8 정상(`file` 확인)
+    - 추정: 깨진 모양이 "CP949로 읽고 CP949로 내보낸 것을 UTF-8로 해석"한 패턴과 같음. pwsh 기본값(UTF-8)이 Codex 샌드박스 안에서는 적용되지 않는 것으로 보임 — 이유는 미확인
+    - 결론: 1안만으로는 해결 안 됨. 남은 선택: 2안(시스템 UTF-8 설정) / 3안(유지)
+  - 결정 (사용자, 2026-11-23): **3안 + 지시문 보완**. 셸 출력 한글 깨짐은 알려진 한계로 둠. 근거: Codex는 읽기 전용이라 파일 손상 없음, TASK·REPORT는 표준 입력으로 정확히 전달, ④는 스크립트가 측정, ⑥(Claude Code)은 한글 정상으로 읽어 보완. 남는 위험: 한글이 핵심인 코드(예: image-compare `guard_explain`, llm-cost-approval 승인 키워드)는 ③·⑤ 교차 검수가 약해짐 (추정). 2안은 실제로 놓친 사례가 나오면 다시 검토
+  - ✅ 지시문 보완 (stage.ps1 `$script:stdinNote`, ③·⑤ 공통): "다른 파일·명령 출력의 한글도 셸에서 깨져 보일 수 있다. 깨진 글자를 결함으로 판단하지 마라. 깨져서 확인 못 한 한글(문자열·패턴·메시지)은 답에 '확인 못 함'으로 적어라" (영문). ASCII만, cmd 특수 문자 없음, CRLF 확인. 역할·권한 그대로
+    - 확인 계획 (선택): mode=`real:s3` 1회 (Codex 1회) — 리뷰가 정상 판정을 내는지, 확인 못 한 한글 목록을 적는지. 생략하면 다음 real 실행 때 함께 확인
+  - ✅ 확인 (run 20261123-151448, mode=real:s3, Codex 2회, 최종 PASS): stage.ps1 문법 정상(끝까지 돎)
+    - 1회차 BLOCK: "REPORT 맨 위 섹션에 만든 것이 없음" — real:s3는 ②가 가짜라 이번 실행 REPORT 섹션이 없음 → 092030과 같은 시험 구성 문제(18절 발견 2). 2회차는 같은 입력으로 PASS (Codex 판정이 시도마다 다를 수 있음, 확인)
+    - 새 지시문 효과 (확인): 1회차 리뷰에 "Korean text in REPORT.md could not be checked because it appeared corrupted" — 확인 못 한 한글을 적음
+    - 발견 (확인+추정): Codex가 스스로 우회를 시도함 — `[Convert]::ToBase64String([IO.File]::ReadAllBytes('REPORT.md'))` → PowerShell 오류. 오류 문구는 깨졌지만 형식("위치 줄:2 문자:1")과 길이로 보아 "메서드를 호출할 수 없습니다. 메서드 호출은 핵심 형식에서만 지원됩니다" = **ConstrainedLanguage(제한 언어 모드)** 오류로 추정. 그렇다면 Codex가 앞에 붙이는 `[Console]::OutputEncoding=UTF8`도 같은 이유로 막혀 출력이 CP949로 남는 것 — 1안이 안 된 이유의 유력한 설명 (추정)
+  - ✅ **D 완료 (2026-11-23)**: 셸 출력 한글 깨짐은 알려진 한계(원인 추정: Codex Windows 샌드박스의 제한 언어 모드), 확인 못 한 한글은 리뷰에 표시. 다음: A
+- A 설계 결정 (2026-11-23, 사용자): ① 별도 "⑦ 판정" 워크플로(runId 입력) ② 반려 시 브랜치 삭제 ③ 승인 한 번에 병합+push. 안전장치(Claude 제안, 사용자 승인): 입력값 검사 두 번(n8n IF + 스크립트), 반려 전 `.pipeline/rejected/<runId>.patch` 저장(실행 전 변경 파일도 커밋에 들어가므로), 커밋 안 된 변경은 git 자체 거부에 맡김, push만 실패하면 브랜치 유지, commit-docs는 main에서만, 판정 기록은 `.pipeline/logs/judge-<runId>.json`
+- ✅ A 구현 (2026-11-23, Claude 작성, 노트북 시험 전):
+  - `scripts/judge.ps1`: 승인 = switch main → merge --ff-only → push origin main → branch -d / 반려 = format-patch 저장 → switch main → branch -D. stage.ps1과 같은 규칙(항상 종료 코드 0, 마지막 줄 JSON의 ok). git은 cmd 경유, 프롬프트 끔(GIT_TERMINAL_PROMPT=0), 표준 입력 닫음, 2분 제한. 대상 폴더 = n8n의 PROJECT_ROOT
+  - `scripts/commit-docs.ps1 "메시지"`: main에서만, 변경 목록 출력 → add -A → commit -F(UTF-8 파일, 한글 메시지) → push. 실패 시 종료 코드 1
+  - `workflows/ai-pipeline-judge.json`: 시작 → 판정 입력(runId, decision) → 입력값 검사(IF, 정규식) → 판정 실행 → 성공?(JSON ok) → 완료 / 판정 실패(n8n 실패 표시), 입력 오류 시 멈춤. 노드 종류·버전은 기존 워크플로와 같은 것만 사용
+  - ASCII·CRLF 확인. PowerShell 문법은 작업 공간에 PowerShell이 없어 미확인 → 노트북 시험으로 확인
+  - 시험 계획 (AI 0회): (1) 승인 — 남아 있던 `run/20261123-084736`(이미 main에 병합됨, 확인) → 병합할 것 없음·push 변경 없음·브랜치 삭제 (2) 반려 — 빈 시험 브랜치 `run/20990101-000000` → 패치 저장·삭제 (3) commit-docs — 이번 수정(PROJECT.md·stage.ps1·새 스크립트) 커밋·push
+  - ✅ 노트북 시험 (2026-11-24, AI 0회, n8n 판정 워크플로 가져와 실행):
+    - 입력 검사: runId 빈 값으로 실행 → "입력 오류"에서 멈춤 (판정 실행 안 됨, 설계대로)
+    - (1) 승인 `20261123-084736`: ok=true, 8단계 모두 exit 0 — fast-forward로 main=bfe223b(변화 없음), push 성공(origin/main=bfe223b 일치), 브랜치 삭제. 커밋 안 된 작업 파일 5개 그대로
+    - (2) 반려 `20990101-000000` (시험 브랜치는 `git commit-tree`로 작업 폴더를 건드리지 않고 만든 빈 커밋 1개): ok=true, 6단계 모두 exit 0 — `.pipeline/rejected/20990101-000000.patch` 저장(커밋 1개), 브랜치 삭제, main 그대로, push 없음. `.pipeline/`은 Git 추적 제외 확인
+    - (3) commit-docs: 이 기록을 포함해 이번 수정 커밋·push로 시험
