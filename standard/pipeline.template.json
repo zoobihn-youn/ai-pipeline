@@ -19,5 +19,8 @@
   "review": {
     "code_paths": ["src/"],
     "output_paths": []
+  },
+  "ops": {
+    "run": ""
   }
 }

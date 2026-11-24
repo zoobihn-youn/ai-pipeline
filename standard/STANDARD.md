@@ -65,9 +65,12 @@
 | `timeouts_sec.default`, `timeouts_sec.s0`~`s6`·`end` | 단계별 시간 제한(초, 10~7200) | 180 |
 | `review.code_paths` | 검수자에게 알려 줄 코드 위치 | 없음 (필수) |
 | `review.output_paths` | 검수자에게 알려 줄 실행 결과 위치 | 없음 |
+| `ops.run` | 운영 흐름(flow=ops) ④에서 실행할 고정 명령 한 줄. 없으면 운영 흐름은 S0에서 멈춤 | 없음 |
 - 경로 규칙: 프로젝트 최상위 기준 상대 경로. `..`·절대 경로·따옴표·cmd 특수 문자(`< > & | ^ %`) 금지 (권한 규칙과 Codex 명령 줄에 그대로 들어가기 때문).
 - 주의: `move_before_run`은 그 폴더가 **이번 실행만의 출력**일 때만 쓴다 (image-compare의 `runs/`처럼 누적 데이터 폴더면 넣지 않는다).
 - S0이 읽은 설정을 실행 기록에 남긴다 (settings: …).
+
+- 흐름 두 가지 (ai-pipeline PROJECT.md 21절 C): **개발(dev)** = S0→②→③→④(TASK.md `RUN:`)→⑤→⑥→PASS면 `run/<id>` 커밋→⑦ 판정. **운영(ops)** = 코드는 그대로 두고 실행만: S0→④(`ops.run`)→⑤→⑥. S0에서 `review.code_paths` 아래에 바뀐 파일이 있으면 멈추고, ④가 코드를 바꿔도 멈춤. 커밋·⑦ 판정 없음, 보고·결과는 Git에 올리지 않는 `.pipeline/ops/REPORT.md`·`RESULT.md`에 쌓임. n8n "설정" 노드의 `flow` 값(dev/ops)으로 고른다.
 
 ## 6. 판정·멈춤 규칙
 - ③·⑤ 답의 첫 줄은 정확히 `VERDICT: PASS` 또는 `VERDICT: BLOCK`. 없으면 실패로 멈춤.

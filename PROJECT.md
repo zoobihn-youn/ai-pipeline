@@ -509,4 +509,26 @@
     - 입력 검사: runId 빈 값으로 실행 → "입력 오류"에서 멈춤 (판정 실행 안 됨, 설계대로)
     - (1) 승인 `20261123-084736`: ok=true, 8단계 모두 exit 0 — fast-forward로 main=bfe223b(변화 없음), push 성공(origin/main=bfe223b 일치), 브랜치 삭제. 커밋 안 된 작업 파일 5개 그대로
     - (2) 반려 `20990101-000000` (시험 브랜치는 `git commit-tree`로 작업 폴더를 건드리지 않고 만든 빈 커밋 1개): ok=true, 6단계 모두 exit 0 — `.pipeline/rejected/20990101-000000.patch` 저장(커밋 1개), 브랜치 삭제, main 그대로, push 없음. `.pipeline/`은 Git 추적 제외 확인
-    - (3) commit-docs: 이 기록을 포함해 이번 수정 커밋·push로 시험
+    - (3) commit-docs: 파일 5개(PROJECT.md·stage.ps1·judge.ps1·commit-docs.ps1·ai-pipeline-judge.json) 커밋 8332986·push 성공, origin/main=8332986 일치, 한글 커밋 메시지 정상(UTF-8, 깨진 글자 없음), 작업 폴더 깨끗
+  - ✅ **A 완료 (2026-11-24)**. 다음: C(개발·운영 흐름 분리). 이 줄은 다음 커밋에 포함
+- C 설계 결정 (2026-11-24, 사용자):
+  - 운영 흐름 = 코드는 그대로 두고 실행만 하는 경우. ②·③ 건너뜀 (S0 → ④ → ⑤ → ⑥ → 결과 기록)
+  - n8n 워크플로는 하나로 두고 "설정" 노드의 `flow` 값(dev/ops)으로 갈라짐
+  - 운영 결과는 커밋하지 않음 (⑦ 판정도 없음). 이유: 매일 도는 실행마다 브랜치·판정이 생기면 저장소가 결과 기록으로 어지러워짐
+  - 운영 명령은 pipeline.json `ops.run` (TASK.md가 아님). 이유: TASK.md는 개발 작업마다 바뀜
+  - 시험 대상 image-compare, 이탈리아, 3장
+- ✅ C 구현 (2026-11-24, Claude 작성, 노트북 시험 전):
+  - `scripts/stage.ps1`: `-Flow dev|ops` 추가 (기본 dev, 기존 동작 그대로). ops일 때
+    - S0: `ops.run` 없으면 멈춤, `review.code_paths` 아래 바뀐 파일이 있으면 멈춤 ("개발 흐름으로 먼저 커밋")
+    - s2·s3를 부르면 멈춤 (운영 흐름에 없는 단계)
+    - S4: `ops.run` 실행. 보고는 `.pipeline/ops/REPORT.md`에 (Git 밖). 실행 뒤 코드 파일이 바뀌었으면 멈춤
+    - S5·S6: 운영용 지시문 (코드 리뷰 대신 실행 결과가 정상·완전한지, TASK.md는 적용 안 함)
+    - 결과 기록: `.pipeline/ops/RESULT.md`, 커밋 안 함. 실행 기록 줄에 flow 추가
+  - `workflows/ai-pipeline-v1-skeleton.json`: 이름 "ai-pipeline (dev / ops flow)", "설정"에 flow(기본 dev), 모든 단계 명령에 `-Flow`, 판정 규칙 "S0 통과" → dev면 S2, ops면 S4 (출력 7개 → 8개)
+  - `standard/STANDARD.md` 5·6절, `standard/pipeline.template.json`에 `ops.run` 추가
+  - 확인: ASCII·CRLF, 중괄호·괄호 짝 맞음. PowerShell 문법은 작업 공간에 PowerShell이 없어 미확인 → 노트북 fake 실행으로 확인
+  - ✅ 노트북 fake 시험 (2026-11-24, AI 0회):
+    - flow=dev, mode=fake (run 20261124-134302): S0→S2→S3→S4→S5→S6→결과 기록 모두 ok, PASS. 실행 기록에 flow=dev. 바뀐 stage.ps1이 PowerShell 5.1에서 문법 오류 없이 돎, 개발 흐름 그대로
+    - 입력 실수 (run 20261124-134401): mode 칸에 ops를 넣음 → "bad argument: -Mode 'ops'"로 S0에서 멈추고 결과 기록으로 감 (입력 검사 정상)
+    - flow=ops, mode=fake (run 20261124-144859): ai-pipeline에는 ops.run이 없어서 S0에서 "ops flow: pipeline.json has no ops.run command"로 멈춤 → 결과 기록(STOPPED) (설계대로, 갈림길·안전장치 확인)
+  - 다음: image-compare에서 flow=dev real로 `plp ops` 명령 개발 → ⑦ 승인 → flow=ops real (이탈리아 TV 2·모니터 2)

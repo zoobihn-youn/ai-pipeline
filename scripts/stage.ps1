@@ -5,6 +5,8 @@
 # Scenarios (fake only): pass | block1 (S3 BLOCK on attempt 1, then PASS) | blockall (S3 always BLOCK) | fail4 (S4 fails)
 # Arguments are checked inside the script (PROJECT.md 18), so a bad value still prints the JSON line and is logged.
 # Project settings (PROJECT.md 20, standard/STANDARD.md 5): paths, model, turns, timeouts and folders to move come from <PROJECT_ROOT>/pipeline.json.
+# Flow (PROJECT.md 21, item C): dev = full flow (S2 develop, S3 code review, S4 runs TASK.md RUN:, PASS commits on run/<RunId>).
+#   ops = run only, code unchanged: S0 -> S4 -> S5 -> S6 -> end. S4 runs pipeline.json ops.run. No commit; report and result go to .pipeline/ops/.
 # Git (PROJECT.md 18): S0 checks git and records files already changed; end commits ONCE on branch run/<RunId>, only when mode=real and outcome=pass.
 param(
     [string]$Stage = "",
@@ -12,7 +14,8 @@ param(
     [string]$Attempt = "1",
     [string]$Mode = "fake",
     [string]$Scenario = "pass",
-    [string]$Outcome = "pass"
+    [string]$Outcome = "pass",
+    [string]$Flow = "dev"
 )
 # Attempt arrives as text so a bad value cannot crash PowerShell before the script starts; it becomes a number here.
 $attemptIn = $Attempt
@@ -28,7 +31,7 @@ $script:pipe = $null
 function Now { Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz" }
 
 function Emit([bool]$ok, [string]$verdict, [string]$note, [int]$aiClaude = 0, [int]$aiCodex = 0) {
-    $o = [ordered]@{ run = $RunId; stage = $Stage; attempt = $Attempt; mode = $Mode; scenario = $Scenario
+    $o = [ordered]@{ run = $RunId; stage = $Stage; attempt = $Attempt; mode = $Mode; flow = $Flow; scenario = $Scenario
                      ok = $ok; verdict = $verdict; note = $note; ai_claude = $aiClaude; ai_codex = $aiCodex; at = (Now) }
     $line = $o | ConvertTo-Json -Compress
     if ($script:pipe) {
@@ -91,10 +94,12 @@ function Read-PipelineConfig {
     $c.codePaths     = @($j.review.code_paths | Where-Object { $_ } | ForEach-Object { [string]$_ })
     $c.outputPaths   = @($j.review.output_paths | Where-Object { $_ } | ForEach-Object { [string]$_ })
     $c.timeouts      = $j.timeouts_sec
+    $c.opsRun        = if ($j.ops -and $j.ops.run) { ([string]$j.ops.run).Trim() } else { "" }   # ops flow command (PROJECT.md 21, item C)
     $errs = @()
     if ($c.writePaths.Count -eq 0) { $errs += "develop.write_paths is empty" }
     if ($c.writePaths -notcontains "REPORT.md") { $errs += "develop.write_paths must include REPORT.md (stage 2 writes its report there)" }
     if ($c.codePaths.Count -eq 0) { $errs += "review.code_paths is empty" }
+    if ($c.opsRun -match "[\r\n]") { $errs += "ops.run must be one line" }
     foreach ($p in @($c.writePaths + $c.moveBeforeRun + $c.codePaths + $c.outputPaths)) {
         if (-not (Test-RelPath $p)) { $errs += "bad path '$p' (relative, no '..', no quotes or cmd special characters)" }
     }
@@ -120,6 +125,23 @@ function Get-StageTimeout([string]$st) {
         if ($v) { $t = [int]$v }
     }
     return $t
+}
+
+# Lines of "git status --porcelain" whose path is under one of review.code_paths (PROJECT.md 21, item C).
+function Get-CodeChanges($statusLines) {
+    $hit = @()
+    foreach ($l in @($statusLines)) {
+        $t = [string]$l
+        if ($t.Length -lt 4) { continue }
+        $path = $t.Substring(3).Trim().Trim('"')
+        if ($path -match ' -> ') { $path = ($path -split ' -> ')[-1].Trim('"') }
+        $path = $path.Replace('\', '/')
+        foreach ($cp in $cfg.codePaths) {
+            $pre = $cp.Replace('\', '/').TrimEnd('/')
+            if ($path -eq $pre -or $path.StartsWith($pre + "/")) { $hit += $path; break }
+        }
+    }
+    return $hit
 }
 
 # Decode program output whose encoding is not known (the RUN command of any project, PROJECT.md 20).
@@ -225,7 +247,7 @@ function Get-FileText([string]$name) {
 }
 function Get-ReportSectionsForRun {
     # Sections of REPORT.md written in this run: headings that contain "(run <RunId>".
-    $text = Get-FileText "REPORT.md"
+    $text = if (Test-Path -LiteralPath $script:reportFile) { [System.IO.File]::ReadAllText($script:reportFile, $utf8) } else { "(missing)" }
     $out = New-Object System.Collections.Generic.List[string]
     $keep = $false
     foreach ($line in ($text -split "`r?`n")) {
@@ -279,8 +301,9 @@ try {
     $script:pipe   = Join-Path $root ".pipeline"
     $script:revDir = Join-Path $script:pipe "reviews"
     $fakeDir       = Join-Path $script:pipe "fake"
+    $opsDir        = Join-Path $script:pipe "ops"
     $logDir        = Join-Path $script:pipe "logs"
-    New-Item -ItemType Directory -Force -Path $script:revDir, $fakeDir, $logDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $script:revDir, $fakeDir, $logDir, $opsDir | Out-Null
     $script:runLog = Join-Path $logDir "run-$RunId.jsonl"
 
     $bad = @()
@@ -289,10 +312,16 @@ try {
     if (@("pass","block1","blockall","fail4") -notcontains $Scenario) { $bad += "-Scenario '$Scenario'" }
     if (@("pass","stopped") -notcontains $Outcome) { $bad += "-Outcome '$Outcome'" }
     if (-not $attemptOk -or $Attempt -lt 1) { $bad += "-Attempt '$attemptIn'" }
+    if (@("dev","ops") -notcontains $Flow) { $bad += "-Flow '$Flow'" }
     if ($bad.Count -gt 0) { Emit $false "" ("bad argument: " + ($bad -join ", ")) }
 
     $realStages = if ($Mode -eq "real") { @("s2","s3","s4","s5","s6") } elseif ($Mode -like "real:*") { $Mode.Substring(5).Split(",") } else { @() }
     $isReal = $realStages -contains $Stage
+    # ops flow (PROJECT.md 21, item C): no develop or code review; the daily report stays out of Git in .pipeline/ops/REPORT.md.
+    $isOps = ($Flow -eq "ops")
+    if ($isOps -and @("s2","s3") -contains $Stage) { Emit $false "" "stage $Stage is not part of the ops flow (code is not changed in ops)" }
+    $script:reportFile = if ($isOps) { Join-Path $opsDir "REPORT.md" } else { Join-Path $root "REPORT.md" }
+    $repName = if ($isOps) { ".pipeline/ops/REPORT.md" } else { "REPORT.md" }
     $implemented = @("s2", "s3", "s4", "s5", "s6")   # stages that have a real implementation so far (PROJECT.md 16)
     if ($isReal -and $implemented -notcontains $Stage) {
         Emit $false "" "real $Stage is not implemented yet (no AI call made)"
@@ -341,6 +370,13 @@ try {
             $note += "; settings: write=" + ($cfg.writePaths -join ",") + " model=" + $cfg.model + "/" + $cfg.maxTurns + " s6=" + $cfg.model6 + "/" + $cfg.maxTurns6 +
                      " move=" + $(if (@($cfg.moveBeforeRun).Count -gt 0) { $cfg.moveBeforeRun -join "," } else { "none" }) + " code=" + $codeList + " out=" + $outList +
                      " timeouts=" + $(if ($cfg.timeouts) { ($cfg.timeouts | ConvertTo-Json -Compress) } else { "default 180" })
+            if ($isOps) {
+                # ops runs the code as it is in Git: stop if a file under review.code_paths is already changed (PROJECT.md 21, item C).
+                if (-not $cfg.opsRun) { Emit $false "" ("ops flow: pipeline.json has no ops.run command; " + $note) }
+                $codeDirty = @(Get-CodeChanges $dirty)
+                $note = "flow=ops; ops.run=" + $cfg.opsRun + "; " + $note
+                if ($codeDirty.Count -gt 0) { Emit $false "" ("ops flow: code changed before run (commit it through the dev flow first): " + ($codeDirty -join ", ") + "; " + $note) }
+            }
             Emit (($c1.code -eq 0) -and ($c2.code -eq 0) -and ($c3.code -eq 0) -and $gitOk) "" $note
         }
         "s2" {
@@ -387,9 +423,14 @@ try {
             if ($isReal) {
                 # Real run WITHOUT AI (PROJECT.md 16, user decision B): stage.ps1 runs the "RUN:" command from TASK.md itself,
                 # so the exit code is measured, not reported by a model. Output files are relative paths (cwd = PROJECT_ROOT).
-                $runLine = Get-Content -LiteralPath (Join-Path $root "TASK.md") -Encoding UTF8 | Where-Object { $_ -match '^\s*RUN:\s*\S' } | Select-Object -First 1
-                if (-not $runLine) { Emit $false "" "no 'RUN:' line in TASK.md" }
-                $cmd = ($runLine -replace '^\s*RUN:\s*', '').Trim().Trim('`').Trim()
+                if ($isOps) {
+                    # ops: the fixed command from pipeline.json, not TASK.md (TASK.md changes with every development task) (PROJECT.md 21, item C)
+                    $cmd = $cfg.opsRun
+                } else {
+                    $runLine = Get-Content -LiteralPath (Join-Path $root "TASK.md") -Encoding UTF8 | Where-Object { $_ -match '^\s*RUN:\s*\S' } | Select-Object -First 1
+                    if (-not $runLine) { Emit $false "" "no 'RUN:' line in TASK.md" }
+                    $cmd = ($runLine -replace '^\s*RUN:\s*', '').Trim().Trim('`').Trim()
+                }
                 # Old output is MOVED (not deleted) so this run's files are new for sure, and the old ones stay as evidence (PROJECT.md 18).
                 # Only the folders in pipeline.json run.move_before_run; default none (a folder that keeps data, like image-compare runs/, must not be listed) (PROJECT.md 20).
                 $moved = 0
@@ -417,14 +458,20 @@ try {
                 $outTxt = OneLine $n.out
                 $errTxt = OneLine $n.err
                 # REPORT.md: new section on top (PROJECT.md 5). Written by the script, so it states only measured facts.
-                $sec = @(("## " + (Now) + " S4 run (run $RunId) - written by stage.ps1, no AI"), "",   # parentheses: "," binds before "+" in PowerShell
+                $sec = @(("## " + (Now) + " S4 run (run $RunId) - flow=$Flow, written by stage.ps1, no AI"), "",   # parentheses: "," binds before "+" in PowerShell
                          ("- command: " + [char]96 + $cmd + [char]96), "- exit code: $code",
                          "- stdout: $outTxt", "- stderr: $errTxt",
                          ("- moved old output files: $moved (folders: " + $(if (@($cfg.moveBeforeRun).Count -gt 0) { $cfg.moveBeforeRun -join ", " } else { "none" }) + ")"), "- raw: .pipeline/logs/run-$RunId-s4.json (exit code), .stdout.txt, .stderr.txt", "")
-                $rep = Join-Path $root "REPORT.md"
+                $rep = $script:reportFile
                 $old = if (Test-Path -LiteralPath $rep) { [System.IO.File]::ReadAllText($rep, $utf8) } else { "" }
                 [System.IO.File]::WriteAllText($rep, (($sec -join "`n") + "`n" + $old), $utf8)
-                Emit ($code -eq 0) "" ("ran: $cmd; exit=$code; moved old output files=$moved; stdout=$outTxt; stderr=$errTxt") 0 0
+                $runNote = "flow=$Flow; ran: $cmd; exit=$code; moved old output files=$moved; stdout=$outTxt; stderr=$errTxt"
+                if ($isOps) {
+                    $after = Invoke-Git "status --porcelain" "s4-gitstatus"
+                    $codeDirty = @(Get-CodeChanges @(($after.out -split "`r?`n") | Where-Object { $_.Trim() }))
+                    if ($codeDirty.Count -gt 0) { Emit $false "" ("ops flow: the run changed code files: " + ($codeDirty -join ", ") + "; " + $runNote) 0 0 }
+                }
+                Emit ($code -eq 0) "" $runNote 0 0
             }
             if ($Scenario -eq "fail4") { Emit $false "" "fake: simulated failure (scenario=fail4)" }
             $f = Join-Path $fakeDir "s4-run-output-$RunId.txt"
@@ -434,12 +481,21 @@ try {
         "s5" {
             if ($isReal) {
                 # Real first check: Codex compares REPORT.md claims with the actual files. BLOCK here does not stop the flow; S6 and the human judge (PROJECT.md 16).
+                if ($isOps) {
+                    # ops (PROJECT.md 21, item C): code unchanged and not reviewed; check that the run itself went right.
+                    $prompt = "You are a read-only checker, stage 5 of an automated pipeline, in the ops flow: the code was not changed in this run and the command came from pipeline.json ops.run. " +
+                              "TASK.md describes the last development task and does not apply to this run. Read the top sections of " + $repName + ", the run record .pipeline/logs/run-$RunId-s4.json " +
+                              "(exit code measured by the pipeline script, not by an AI), its stdout and stderr files, the output files the command wrote, and the code in " + $codeList + " only to understand the outputs. " +
+                              "Do not run anything. Reply in at most 8 lines. The first line must be exactly VERDICT: PASS or VERDICT: BLOCK. " +
+                              "Use BLOCK if the run failed, an expected output is missing or empty, or the results look abnormal (for example zero items or errors in the output). Then say briefly what you checked."
+                } else {
                 $prompt = "You are a read-only checker, stage 5 of an automated pipeline. Read TASK.md, the top sections of REPORT.md, the code in " + $codeList + ", the output files in " + $outList + " " +
                           "and the run record .pipeline/logs/run-$RunId-s4.json (exit code measured by the pipeline script, not by an AI). " +
                           "Do not run anything. Reply in at most 8 lines. The first line must be exactly VERDICT: PASS or VERDICT: BLOCK. " +
                           "Use BLOCK if a claim in REPORT.md does not match the actual files or a done condition in TASK.md is not met. Then say briefly whether each claim matches."
+                }
                 $prompt += " " + $script:stdinNote
-                $in = "=== TASK.md ===`n" + (Get-FileText "TASK.md") + "`n`n=== REPORT.md sections of this run ===`n" + (Get-ReportSectionsForRun)
+                $in = "=== TASK.md ===`n" + (Get-FileText "TASK.md") + "`n`n=== " + $repName + " sections of this run ===`n" + (Get-ReportSectionsForRun)
                 $c = Invoke-Codex "s5" $prompt "review-$RunId-s5.md" $in
                 Emit $c.ok $c.verdict $c.note 0 1
             }
@@ -453,12 +509,22 @@ try {
                 # Real second check: new claude -p session, read only (no allowed tools). Its answer goes into RESULT via the end stage (PROJECT.md 3, 15).
                 $s3Last = Get-ChildItem -LiteralPath $script:revDir -Filter "review-$RunId-s3-*.md" | Sort-Object Name | Select-Object -Last 1
                 $s3Name = if ($s3Last) { $s3Last.Name } else { "none" }
+                if ($isOps) {
+                $prompt = "You are stage 6, the second reviewer of an automated pipeline, in the ops flow: the code was not changed and was not reviewed in this run; TASK.md does not apply. " +
+                          "Do not change any file and do not run anything. " +
+                          "Read the top sections of " + $repName + ", the run record .pipeline/logs/run-$RunId-s4.json with its stdout and stderr files, the output files the command wrote, " +
+                          "and the first-round check .pipeline/reviews/review-$RunId-s5.md. Focus on whether the run results look normal and complete. " +
+                          "Answer in Korean, at most 15 lines, in this order: 1. how important each problem the checker raised is; " +
+                          "2. problems it missed, or none; 3. a short table of points where you disagree with the stage 5 check, or none; " +
+                          "4. last line exactly RECOMMEND: PASS or RECOMMEND: BLOCK, as advice for the human who decides."
+                } else {
                 $prompt = "You are stage 6, the second reviewer of an automated pipeline. Do not change any file and do not run anything. " +
                           "Read TASK.md, the code in " + $codeList + ", the top sections of REPORT.md, the output files in " + $outList + ", the run record .pipeline/logs/run-$RunId-s4.json, and the first-round reviews " +
                           ".pipeline/reviews/$s3Name (code review) and .pipeline/reviews/review-$RunId-s5.md (check of REPORT vs files). " +
                           "Answer in Korean, at most 15 lines, in this order: 1. how important each problem the reviewers raised is; " +
                           "2. problems they missed, or none; 3. a short table of points where you disagree with the stage 5 check, or none; " +
                           "4. last line exactly RECOMMEND: PASS or RECOMMEND: BLOCK, as advice for the human who decides."
+                }
                 $c = Invoke-Claude "s6" $prompt @() $cfg.model6 $cfg.maxTurns6
                 $f = Join-Path $script:revDir "review-$RunId-s6.md"
                 [System.IO.File]::WriteAllText($f, $c.result, $utf8)
@@ -478,7 +544,7 @@ try {
             foreach ($r in $rows) { $aiC += [int]$r.ai_claude; $aiX += [int]$r.ai_codex }
             $last = $rows | Select-Object -Last 1
             $md = New-Object System.Collections.Generic.List[string]
-            $md.Add("## " + (Now) + " run $RunId - " + $Outcome.ToUpper() + " (mode=$Mode, scenario=$Scenario)")
+            $md.Add("## " + (Now) + " run $RunId - " + $Outcome.ToUpper() + " (flow=$Flow, mode=$Mode, scenario=$Scenario)")
             $md.Add("")
             $md.Add("| stage | attempt | ok | verdict | note |")
             $md.Add("|---|---|---|---|---|")
@@ -495,9 +561,10 @@ try {
                 $more = if ($preLines.Count -gt 20) { " ..." } else { "" }
                 $md.Add("- changed before run (git status at S0): " + $preLines.Count + $(if ($preLines.Count -gt 0) { " - " + $shown + $more } else { "" }))
             }
-            $doCommit = ($Mode -eq "real") -and ($Outcome -eq "pass")
+            $doCommit = ($Mode -eq "real") -and ($Outcome -eq "pass") -and (-not $isOps)   # ops never commits (PROJECT.md 21, item C)
             $branch = "run/$RunId"
             if ($doCommit) { $md.Add("- git: commit on branch $branch (hash in .pipeline/logs/run-$RunId.jsonl). Judge (7): git switch main, git merge --ff-only $branch, git push") }
+            elseif ($isOps) { $md.Add("- git: no commit (ops flow: code unchanged; report and result stay in .pipeline/ops/, not in Git)") }
             else { $md.Add("- git: no commit (commit only when mode=real and PASS)") }
             $md.Add("")
             $s6 = Join-Path $script:revDir "review-$RunId-s6.md"
@@ -507,7 +574,7 @@ try {
                 $md.Add(([System.IO.File]::ReadAllText($s6, $utf8)).Trim())
                 $md.Add("")
             }
-            $resultFile = if ($Mode -ne "real") { Join-Path $fakeDir "RESULT.md" } else { Join-Path $root "RESULT.md" }
+            $resultFile = if ($Mode -ne "real") { Join-Path $fakeDir "RESULT.md" } elseif ($isOps) { Join-Path $opsDir "RESULT.md" } else { Join-Path $root "RESULT.md" }
             $old = if (Test-Path -LiteralPath $resultFile) { [System.IO.File]::ReadAllText($resultFile, $utf8) } else { "" }
             [System.IO.File]::WriteAllText($resultFile, (($md -join "`n") + "`n" + $old), $utf8)   # newest on top (PROJECT.md 5)
             if (-not $doCommit) { Emit ($Outcome -eq "pass") $Outcome ("result written: " + $resultFile) }

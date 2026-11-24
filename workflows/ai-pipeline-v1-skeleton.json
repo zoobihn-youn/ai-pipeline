@@ -1,5 +1,5 @@
 {
-  "name": "ai-pipeline v1 skeleton (fake, AI 0 calls)",
+  "name": "ai-pipeline (dev / ops flow)",
   "settings": {
     "executionOrder": "v1"
   },
@@ -41,6 +41,12 @@
               "type": "string"
             },
             {
+              "id": "337481e6-f61a-47b0-8cf0-a58c0d1b575c",
+              "name": "flow",
+              "value": "dev",
+              "type": "string"
+            },
+            {
               "id": "22abcc67-aa4b-4622-b294-5a0dbe97b79a",
               "name": "scenario",
               "value": "pass",
@@ -67,7 +73,7 @@
         300
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s0 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s0 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }}"
       }
     },
     {
@@ -80,7 +86,7 @@
         300
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s2 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }} -Attempt {{ $runIndex + 1 }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s2 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }} -Attempt {{ $runIndex + 1 }}"
       }
     },
     {
@@ -93,7 +99,7 @@
         300
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s3 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }} -Attempt {{ $runIndex + 1 }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s3 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }} -Attempt {{ $runIndex + 1 }}"
       }
     },
     {
@@ -106,7 +112,7 @@
         300
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s4 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s4 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }}"
       }
     },
     {
@@ -119,7 +125,7 @@
         300
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s5 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s5 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }}"
       }
     },
     {
@@ -132,7 +138,7 @@
         300
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s6 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage s6 -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }}"
       }
     },
     {
@@ -175,12 +181,21 @@
                       "operation": "true",
                       "singleValue": true
                     }
+                  },
+                  {
+                    "id": "a4754c83-fa56-4f71-bf04-05d665d151a3",
+                    "leftValue": "={{ $('설정').first().json.flow }}",
+                    "rightValue": "dev",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ],
                 "combinator": "and"
               },
               "renameOutput": true,
-              "outputKey": "S0 통과 → S2"
+              "outputKey": "S0 통과·dev → S2"
             },
             {
               "conditions": {
@@ -378,6 +393,49 @@
               },
               "renameOutput": true,
               "outputKey": "S5 통과(PASS·BLOCK 무관) → S6"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "511d8f20-c6ed-4614-92e5-e6c0a2096052",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage }}",
+                    "rightValue": "s0",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "403c73bf-3af6-4386-8240-17ffc8fdf68e",
+                    "leftValue": "={{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  },
+                  {
+                    "id": "d23a482a-cf3a-4a55-bdbc-aeb622b49e33",
+                    "leftValue": "={{ $('설정').first().json.flow }}",
+                    "rightValue": "ops",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "S0 통과·ops → S4 (개발·코드 리뷰 건너뜀)"
             }
           ]
         },
@@ -398,7 +456,7 @@
         620
       ],
       "parameters": {
-        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage end -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Scenario {{ $('설정').first().json.scenario }} -Outcome {{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage === 's6' && JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok === true ? 'pass' : 'stopped' }}"
+        "command": "=powershell -NoProfile -ExecutionPolicy Bypass -File C:\\dev\\ai-pipeline\\scripts\\stage.ps1 -Stage end -RunId {{ $('설정').first().json.runId }} -Mode {{ $('설정').first().json.mode }} -Flow {{ $('설정').first().json.flow }} -Scenario {{ $('설정').first().json.scenario }} -Outcome {{ JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).stage === 's6' && JSON.parse($json.stdout.trim().split(/\\r?\\n/).pop()).ok === true ? 'pass' : 'stopped' }}"
       }
     },
     {
@@ -579,6 +637,13 @@
         [
           {
             "node": "S6 2차 검수",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "S4 실행",
             "type": "main",
             "index": 0
           }
